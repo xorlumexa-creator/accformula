@@ -10,7 +10,7 @@ export default function UploadPage() {
   const navigate = useNavigate();
 
   const handleFile = useCallback((file: File) => {
-    if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+    if (file.type === 'text/csv' || file.type === 'application/vnd.ms-excel' || file.name.toLowerCase().endsWith('.csv')) {
       uploadCSV(file);
     }
   }, [uploadCSV]);
@@ -39,7 +39,7 @@ export default function UploadPage() {
           dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30'
         }`}
       >
-        <input ref={inputRef} type="file" accept=".csv" className="hidden" onChange={(e) => {
+        <input ref={inputRef} type="file" accept=".csv,text/csv,application/vnd.ms-excel" className="hidden" onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
         }} />
