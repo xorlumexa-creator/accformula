@@ -1,16 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { Upload, FileText, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Trash2, ClipboardPaste } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function UploadPage() {
-  const { uploadCSV, fileName, stats, isLoading, error, clearData } = useTelemetry();
+  const { uploadCSV, uploadText, fileName, stats, isLoading, error, clearData } = useTelemetry();
   const [dragOver, setDragOver] = useState(false);
+  const [pasteText, setPasteText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
   const handleFile = useCallback((file: File) => {
-    if (file.type === 'text/csv' || file.type === 'application/vnd.ms-excel' || file.name.toLowerCase().endsWith('.csv')) {
+    if (file.type === 'text/csv' || file.type === 'text/plain' || file.type === 'application/vnd.ms-excel' || file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.txt')) {
       uploadCSV(file);
     }
   }, [uploadCSV]);
@@ -39,7 +40,7 @@ export default function UploadPage() {
           dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30'
         }`}
       >
-        <input ref={inputRef} type="file" accept=".csv,text/csv,application/vnd.ms-excel" className="hidden" onChange={(e) => {
+        <input ref={inputRef} type="file" accept=".csv,.txt,text/csv,text/plain,application/vnd.ms-excel" className="hidden" onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
         }} />
@@ -47,7 +48,28 @@ export default function UploadPage() {
         <p className="font-medium mb-1">
           {isLoading ? 'Processing...' : 'Drop your CSV file here or click to browse'}
         </p>
-        <p className="text-sm text-muted-foreground">Supports .csv files</p>
+        <p className="text-sm text-muted-foreground">Supports .csv and .txt files</p>
+      </div>
+
+      {/* Paste Text */}
+      <div className="gradient-card border border-border rounded-lg p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <ClipboardPaste className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium">Or paste data directly</h3>
+        </div>
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          placeholder={"Time,Speed,Acceleration,Temperature\n0.0,0.0,0.5,25.0\n0.1,2.5,0.5,25.1"}
+          className="w-full h-32 bg-background/50 border border-border rounded-md p-3 font-mono text-xs resize-y outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+        />
+        <button
+          onClick={() => { if (pasteText.trim()) { uploadText(pasteText.trim()); setPasteText(''); } }}
+          disabled={!pasteText.trim() || isLoading}
+          className="w-full bg-secondary text-secondary-foreground rounded-lg py-2 font-medium hover:bg-secondary/80 transition-colors disabled:opacity-50"
+        >
+          Parse Pasted Data
+        </button>
       </div>
 
       {/* Error */}
