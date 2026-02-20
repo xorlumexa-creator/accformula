@@ -26,6 +26,7 @@ interface TelemetryContextType {
   isLoading: boolean;
   error: string | null;
   uploadCSV: (file: File) => void;
+  uploadText: (text: string) => void;
   clearData: () => void;
 }
 
@@ -98,6 +99,50 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const uploadText = useCallback((text: string) => {
+    setIsLoading(true);
+    setError(null);
+    setFileName('Pasted text data');
+
+    Papa.parse(text, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true,
+      complete: (results) => {
+        try {
+          const rows: TelemetryRow[] = [];
+          for (const row of results.data as Record<string, any>[]) {
+            const time = parseFloat(row.Time ?? row.time ?? row.TIME ?? '');
+            const speed = parseFloat(row.Speed ?? row.speed ?? row.SPEED ?? '');
+            const acceleration = parseFloat(row.Acceleration ?? row.acceleration ?? row.ACCELERATION ?? row.Accel ?? row.accel ?? '');
+            const temperature = parseFloat(row.Temperature ?? row.temperature ?? row.TEMPERATURE ?? row.Temp ?? row.temp ?? '');
+
+            if (!isNaN(time) && !isNaN(speed) && !isNaN(acceleration) && !isNaN(temperature)) {
+              rows.push({ time, speed, acceleration, temperature });
+            }
+          }
+
+          if (rows.length === 0) {
+            setError('No valid data found. Ensure text has columns: Time, Speed, Acceleration, Temperature');
+            setData([]);
+            setStats(null);
+          } else {
+            rows.sort((a, b) => a.time - b.time);
+            setData(rows);
+            setStats(computeStats(rows));
+          }
+        } catch {
+          setError('Failed to parse text data');
+        }
+        setIsLoading(false);
+      },
+      error: () => {
+        setError('Failed to parse text data');
+        setIsLoading(false);
+      },
+    });
+  }, []);
+
   const clearData = useCallback(() => {
     setData([]);
     setStats(null);
@@ -106,7 +151,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <TelemetryContext.Provider value={{ data, stats, fileName, isLoading, error, uploadCSV, clearData }}>
+    <TelemetryContext.Provider value={{ data, stats, fileName, isLoading, error, uploadCSV, uploadText, clearData }}>
       {children}
     </TelemetryContext.Provider>
   );
