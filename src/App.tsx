@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./hooks/useAuth";
 import AppLayout from "./components/AppLayout";
 import Index from "./pages/Index";
 import UploadPage from "./pages/UploadPage";
+import ImportDesignPage from "./pages/ImportDesignPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
@@ -45,6 +46,7 @@ const App = () => (
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route path="/" element={<Index />} />
                 <Route path="/upload" element={<UploadPage />} />
+                <Route path="/import-design" element={<ImportDesignPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/lap-calculator" element={<LapCalculatorPage />} />

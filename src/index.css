@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,43 +6,43 @@
 
 @layer base {
   :root {
-    --background: 220 20% 7%;
+    --background: 220 25% 5%;
     --foreground: 0 0% 95%;
 
-    --card: 220 18% 10%;
+    --card: 220 20% 8%;
     --card-foreground: 0 0% 95%;
 
-    --popover: 220 18% 10%;
+    --popover: 220 20% 8%;
     --popover-foreground: 0 0% 95%;
 
     --primary: 0 85% 55%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 16%;
+    --secondary: 220 18% 13%;
     --secondary-foreground: 0 0% 90%;
 
-    --muted: 220 14% 14%;
-    --muted-foreground: 220 10% 55%;
+    --muted: 220 16% 11%;
+    --muted-foreground: 220 10% 50%;
 
-    --accent: 30 95% 55%;
+    --accent: 0 85% 55%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
+    --border: 220 15% 15%;
+    --input: 220 15% 15%;
     --ring: 0 85% 55%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
-    --sidebar-background: 220 20% 8%;
+    --sidebar-background: 220 25% 6%;
     --sidebar-foreground: 0 0% 90%;
     --sidebar-primary: 0 85% 55%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 15% 14%;
+    --sidebar-accent: 220 15% 12%;
     --sidebar-accent-foreground: 0 0% 90%;
-    --sidebar-border: 220 15% 15%;
+    --sidebar-border: 220 15% 12%;
     --sidebar-ring: 0 85% 55%;
 
     --success: 145 65% 42%;
@@ -68,28 +68,58 @@
   .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
+
+  .font-display {
+    font-family: 'Orbitron', sans-serif;
+  }
 }
 
 @layer utilities {
   .glow-red {
-    box-shadow: 0 0 20px hsl(0 85% 55% / 0.15), 0 0 60px hsl(0 85% 55% / 0.05);
+    box-shadow: 0 0 20px hsl(0 85% 55% / 0.2), 0 0 60px hsl(0 85% 55% / 0.08);
   }
 
   .glow-accent {
-    box-shadow: 0 0 20px hsl(30 95% 55% / 0.15), 0 0 60px hsl(30 95% 55% / 0.05);
+    box-shadow: 0 0 20px hsl(0 85% 55% / 0.15), 0 0 60px hsl(0 85% 55% / 0.05);
   }
 
   .gradient-card {
-    background: linear-gradient(135deg, hsl(220 18% 12%) 0%, hsl(220 18% 8%) 100%);
+    background: linear-gradient(135deg, hsl(220 20% 10%) 0%, hsl(220 20% 6%) 100%);
   }
 
   .gradient-hero {
-    background: linear-gradient(135deg, hsl(0 85% 55% / 0.1) 0%, transparent 50%);
+    background: linear-gradient(135deg, hsl(0 85% 55% / 0.08) 0%, transparent 50%);
+  }
+
+  .glass {
+    background: hsl(220 20% 8% / 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid hsl(220 15% 18% / 0.5);
+  }
+
+  .glass-strong {
+    background: hsl(220 20% 10% / 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid hsl(0 85% 55% / 0.1);
   }
 
   .data-display {
     font-family: 'JetBrains Mono', monospace;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
+  }
+
+  .border-glow {
+    border: 1px solid hsl(0 85% 55% / 0.2);
+    box-shadow: inset 0 0 30px hsl(0 85% 55% / 0.03);
+  }
+
+  .text-gradient {
+    background: linear-gradient(135deg, hsl(0, 85%, 60%) 0%, hsl(0, 85%, 45%) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 }
