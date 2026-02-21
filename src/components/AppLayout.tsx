@@ -1,5 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Upload, BarChart3, MessageSquare, Timer, Activity } from 'lucide-react';
+import { LayoutDashboard, Upload, BarChart3, MessageSquare, Timer, LogOut } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { Button } from '@/components/ui/button';
+import lumexaLogo from '@/assets/lumexa-logo.jpeg';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -10,17 +13,15 @@ const navItems = [
 ];
 
 export default function AppLayout() {
+  const { signOut } = useAuth();
+
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top Bar */}
       <header className="h-14 border-b border-border flex items-center px-4 md:px-6 gap-3 shrink-0 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <Activity className="w-6 h-6 text-primary" />
+        <img src={lumexaLogo} alt="Lumexa" className="w-8 h-8 rounded-lg object-cover" />
         <h1 className="text-lg font-bold tracking-tight">
-          Formula<span className="text-primary">Acc</span>
+          Lumexa
         </h1>
-        <span className="hidden sm:inline text-xs text-muted-foreground ml-1 border border-border rounded px-1.5 py-0.5">
-          TELEMETRY
-        </span>
         <nav className="ml-auto flex items-center gap-1">
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
@@ -39,10 +40,11 @@ export default function AppLayout() {
               <span className="hidden md:inline">{label}</span>
             </NavLink>
           ))}
+          <Button variant="ghost" size="icon" onClick={signOut} className="ml-2 text-muted-foreground hover:text-destructive">
+            <LogOut className="w-4 h-4" />
+          </Button>
         </nav>
       </header>
-
-      {/* Page Content */}
       <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto">
         <Outlet />
       </main>
