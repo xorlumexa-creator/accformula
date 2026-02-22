@@ -11,7 +11,8 @@ export default function UploadPage() {
   const navigate = useNavigate();
 
   const handleFile = useCallback((file: File) => {
-    if (file.type === 'text/csv' || file.type === 'text/plain' || file.type === 'application/vnd.ms-excel' || file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.txt')) {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (['csv', 'txt'].includes(ext || '') || file.type.includes('csv') || file.type.includes('text')) {
       uploadCSV(file);
     }
   }, [uploadCSV]);
@@ -27,7 +28,7 @@ export default function UploadPage() {
     <div className="max-w-2xl mx-auto space-y-6 animate-slide-up">
       <div>
         <h2 className="text-xl font-bold">Upload Telemetry Data</h2>
-        <p className="text-sm text-muted-foreground">Import CSV files from your car's sensors</p>
+        <p className="text-sm text-muted-foreground">Import any CSV file with sensor data — all columns are auto-detected</p>
       </div>
 
       {/* Drop Zone */}
@@ -48,7 +49,7 @@ export default function UploadPage() {
         <p className="font-medium mb-1">
           {isLoading ? 'Processing...' : 'Drop your CSV file here or click to browse'}
         </p>
-        <p className="text-sm text-muted-foreground">Supports .csv and .txt files</p>
+        <p className="text-sm text-muted-foreground">Any CSV with headers — columns auto-detected</p>
       </div>
 
       {/* Paste Text */}
@@ -60,7 +61,7 @@ export default function UploadPage() {
         <textarea
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
-          placeholder={"Time,Speed,Acceleration,Temperature\n0.0,0.0,0.5,25.0\n0.1,2.5,0.5,25.1"}
+          placeholder={"Sensor,Value,Unit,Timestamp\nEngineTemp,95,°C,0.0\nSpeed,120,km/h,0.1\nPressure,101.3,kPa,0.2"}
           className="w-full h-32 bg-background/50 border border-border rounded-md p-3 font-mono text-xs resize-y outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
         />
         <button
@@ -92,17 +93,20 @@ export default function UploadPage() {
           </div>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div className="bg-secondary/50 rounded-md p-3">
-              <p className="text-lg font-bold data-display">{stats.dataPoints}</p>
+              <p className="text-lg font-bold data-display">{stats.rowCount}</p>
               <p className="text-xs text-muted-foreground">Data Points</p>
             </div>
             <div className="bg-secondary/50 rounded-md p-3">
-              <p className="text-lg font-bold data-display">{stats.totalTime.toFixed(1)}s</p>
-              <p className="text-xs text-muted-foreground">Duration</p>
+              <p className="text-lg font-bold data-display">{stats.numericColumns.length}</p>
+              <p className="text-xs text-muted-foreground">Metrics</p>
             </div>
             <div className="bg-secondary/50 rounded-md p-3">
-              <p className="text-lg font-bold data-display">{stats.maxSpeed.toFixed(1)}</p>
-              <p className="text-xs text-muted-foreground">Max km/h</p>
+              <p className="text-lg font-bold data-display">{stats.columns.length}</p>
+              <p className="text-xs text-muted-foreground">Columns</p>
             </div>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            <span className="font-medium">Detected columns:</span> {stats.columns.join(', ')}
           </div>
           <div className="flex gap-2">
             <button
@@ -127,12 +131,12 @@ export default function UploadPage() {
           <FileText className="w-4 h-4 text-muted-foreground" />
           <h3 className="text-sm font-medium">CSV Format</h3>
         </div>
-        <p className="text-sm text-muted-foreground mb-3">Your CSV file should contain these columns:</p>
-        <div className="bg-background/50 rounded-md p-3 font-mono text-xs overflow-x-auto">
-          <p className="text-muted-foreground">Time,Speed,Acceleration,Temperature</p>
-          <p>0.0,0.0,0.5,25.3</p>
-          <p>0.1,5.2,1.2,25.8</p>
-          <p>0.2,12.1,1.8,26.4</p>
+        <p className="text-sm text-muted-foreground mb-3">Any CSV with headers works. Units are auto-detected from column names:</p>
+        <div className="bg-background/50 rounded-md p-3 font-mono text-xs overflow-x-auto space-y-1">
+          <p className="text-muted-foreground">Time,Speed (km/h),Temperature (°C),Pressure (kPa)</p>
+          <p>0.0,0.0,25.3,101.3</p>
+          <p>0.1,5.2,25.8,101.1</p>
+          <p>0.2,12.1,26.4,100.9</p>
         </div>
       </div>
     </div>

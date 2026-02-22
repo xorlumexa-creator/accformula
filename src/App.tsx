@@ -12,6 +12,7 @@ import ImportDesignPage from "./pages/ImportDesignPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
+import SensorIntegrationPage from "./pages/SensorIntegrationPage";
 import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import NotFound from "./pages/NotFound";
@@ -50,6 +51,7 @@ const App = () => (
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/lap-calculator" element={<LapCalculatorPage />} />
+                <Route path="/sensors" element={<SensorIntegrationPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
