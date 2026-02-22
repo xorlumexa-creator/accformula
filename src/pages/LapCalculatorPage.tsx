@@ -8,11 +8,15 @@ export default function LapCalculatorPage() {
   const [distance, setDistance] = useState('');
   const [result, setResult] = useState<{ time: number; minutes: number; seconds: number } | null>(null);
 
+  // Find speed column if exists
+  const speedCol = stats?.numericColumns.find(c => /speed|velocity|km\/h|mph/i.test(c));
+  const avgSpeed = speedCol ? stats!.summary[speedCol].avg : null;
+
   const calculate = () => {
-    if (!stats || !distance) return;
+    if (!avgSpeed || !distance) return;
     const d = parseFloat(distance);
     if (isNaN(d) || d <= 0) return;
-    const avgSpeedMs = (stats.avgSpeed * 1000) / 3600; // km/h to m/s
+    const avgSpeedMs = (avgSpeed * 1000) / 3600; // km/h to m/s
     const lapTime = d / avgSpeedMs;
     setResult({ time: lapTime, minutes: Math.floor(lapTime / 60), seconds: lapTime % 60 });
   };
@@ -29,19 +33,19 @@ export default function LapCalculatorPage() {
         <h2 className="text-xl font-bold">Lap Time Calculator</h2>
       </div>
 
-      {!stats ? (
+      {!avgSpeed ? (
         <div className="gradient-card border border-border rounded-lg p-8 text-center space-y-3">
           <Calculator className="w-10 h-10 text-muted-foreground/30 mx-auto" />
-          <p className="text-muted-foreground text-sm">Upload telemetry data first to use the calculator</p>
+          <p className="text-muted-foreground text-sm">Upload telemetry data with a speed column to use the calculator</p>
           <Link to="/upload" className="inline-block bg-primary text-primary-foreground px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
-            Upload CSV
+            Upload Data
           </Link>
         </div>
       ) : (
         <>
           <div className="gradient-card border border-border rounded-lg p-5 space-y-4">
             <div className="text-sm text-muted-foreground">
-              Using average speed: <span className="data-display font-bold text-foreground">{stats.avgSpeed.toFixed(1)} km/h</span>
+              Using average {speedCol}: <span className="data-display font-bold text-foreground">{avgSpeed.toFixed(1)} {stats!.summary[speedCol!].unit || 'km/h'}</span>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5">Track Distance (meters)</label>
@@ -55,17 +59,12 @@ export default function LapCalculatorPage() {
               />
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={calculate}
-                disabled={!distance}
-                className="flex-1 bg-primary text-primary-foreground rounded-lg py-2.5 font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <button onClick={calculate} disabled={!distance}
+                className="flex-1 bg-primary text-primary-foreground rounded-lg py-2.5 font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                 Calculate
               </button>
-              <button
-                onClick={reset}
-                className="px-4 bg-secondary text-secondary-foreground rounded-lg py-2.5 hover:bg-secondary/80 transition-colors"
-              >
+              <button onClick={reset}
+                className="px-4 bg-secondary text-secondary-foreground rounded-lg py-2.5 hover:bg-secondary/80 transition-colors">
                 <RotateCcw className="w-4 h-4" />
               </button>
             </div>
@@ -77,9 +76,6 @@ export default function LapCalculatorPage() {
               <p className="text-4xl font-bold data-display">
                 {result.minutes > 0 && <span>{result.minutes}<span className="text-lg text-muted-foreground">m </span></span>}
                 {result.seconds.toFixed(2)}<span className="text-lg text-muted-foreground">s</span>
-              </p>
-              <p className="text-xs text-muted-foreground mt-3">
-                Calculated as {distance}m ÷ ({stats.avgSpeed.toFixed(1)} km/h × 1000/3600) = {result.time.toFixed(2)}s
               </p>
             </div>
           )}

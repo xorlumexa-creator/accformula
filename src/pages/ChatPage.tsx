@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useTelemetry } from '@/context/TelemetryContext';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
-import { Send, Bot, User, Sparkles, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Loader2, History } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 
@@ -27,31 +27,56 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [projectContext, setProjectContext] = useState<any>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [chatSessions, setChatSessions] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Load project context & past sessions
   useEffect(() => {
-    if (user) {
-      supabase.from('projects').select('*').eq('user_id', user.id)
-        .order('created_at', { ascending: false }).limit(1)
-        .then(({ data }) => {
-          if (data?.[0]) {
-            const p = data[0];
-            setProjectContext({
-              name: p.project_name,
-              category: p.category,
-              purpose: p.purpose,
-              budget: p.budget_range,
-              complexity: p.complexity,
-              description: p.description,
-            });
-          }
-        });
-    }
+    if (!user) return;
+    supabase.from('projects').select('*').eq('user_id', user.id)
+      .order('created_at', { ascending: false }).limit(1)
+      .then(({ data }) => {
+        if (data?.[0]) {
+          const p = data[0];
+          setProjectContext({
+            name: p.project_name, category: p.category, purpose: p.purpose,
+            budget: p.budget_range, complexity: p.complexity, description: p.description,
+          });
+        }
+      });
+
+    supabase.from('chat_sessions').select('id, title, created_at')
+      .eq('user_id', user.id).order('created_at', { ascending: false }).limit(20)
+      .then(({ data }) => { if (data) setChatSessions(data); });
   }, [user]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
+
+  const loadChatSession = async (sid: string) => {
+    const { data } = await supabase.from('chat_messages')
+      .select('role, content').eq('session_id', sid)
+      .order('created_at', { ascending: true });
+    if (data) {
+      setMessages(data as Message[]);
+      setSessionId(sid);
+      setShowHistory(false);
+    }
+  };
+
+  const ensureSession = async (): Promise<string> => {
+    if (sessionId) return sessionId;
+    const { data, error } = await supabase.from('chat_sessions').insert({
+      user_id: user!.id, title: 'New Chat',
+    }).select('id').single();
+    if (error || !data) throw new Error('Failed to create chat session');
+    setSessionId(data.id);
+    setChatSessions(prev => [{ id: data.id, title: 'New Chat', created_at: new Date().toISOString() }, ...prev]);
+    return data.id;
+  };
 
   const send = async (text: string) => {
     if (!text.trim() || isLoading) return;
@@ -61,19 +86,35 @@ export default function ChatPage() {
     setInput('');
     setIsLoading(true);
 
-    let assistantSoFar = '';
-    const upsertAssistant = (chunk: string) => {
-      assistantSoFar += chunk;
-      setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last?.role === 'assistant') {
-          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
-        }
-        return [...prev, { role: 'assistant', content: assistantSoFar }];
-      });
-    };
-
     try {
+      const sid = await ensureSession();
+      // Save user message to DB
+      await supabase.from('chat_messages').insert({
+        user_id: user!.id, session_id: sid, role: 'user', content: text.trim(),
+      });
+
+      // Build telemetry summary for context
+      let telemetryData: any = null;
+      if (stats) {
+        telemetryData = {
+          rowCount: stats.rowCount,
+          columns: stats.numericColumns,
+          summary: stats.summary,
+        };
+      }
+
+      let assistantSoFar = '';
+      const upsertAssistant = (chunk: string) => {
+        assistantSoFar += chunk;
+        setMessages(prev => {
+          const last = prev[prev.length - 1];
+          if (last?.role === 'assistant') {
+            return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
+          }
+          return [...prev, { role: 'assistant', content: assistantSoFar }];
+        });
+      };
+
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
         headers: {
@@ -82,7 +123,7 @@ export default function ChatPage() {
         },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-          telemetryStats: stats,
+          telemetryStats: telemetryData,
           projectContext,
         }),
       });
@@ -124,11 +165,29 @@ export default function ChatPage() {
           }
         }
       }
+
+      // Save assistant message to DB
+      if (assistantSoFar) {
+        await supabase.from('chat_messages').insert({
+          user_id: user!.id, session_id: sid, role: 'assistant', content: assistantSoFar,
+        });
+        // Update session title from first user message
+        if (newMessages.length <= 2) {
+          const title = text.trim().slice(0, 60);
+          await supabase.from('chat_sessions').update({ title }).eq('id', sid);
+          setChatSessions(prev => prev.map(s => s.id === sid ? { ...s, title } : s));
+        }
+      }
     } catch (e) {
       console.error(e);
       toast.error('Failed to connect');
     }
     setIsLoading(false);
+  };
+
+  const newChat = () => {
+    setMessages([]);
+    setSessionId(null);
   };
 
   return (
@@ -138,7 +197,30 @@ export default function ChatPage() {
           <Sparkles className="w-4 h-4 text-primary" />
         </div>
         <h2 className="text-xl font-bold font-display tracking-wide">Engineering AI</h2>
+        <div className="ml-auto flex gap-2">
+          <button onClick={() => setShowHistory(!showHistory)}
+            className="p-2 rounded-lg glass hover:bg-primary/10 transition-colors">
+            <History className="w-4 h-4 text-muted-foreground" />
+          </button>
+          <button onClick={newChat}
+            className="px-3 py-1.5 rounded-lg glass text-xs font-medium hover:bg-primary/10 transition-colors text-muted-foreground">
+            New Chat
+          </button>
+        </div>
       </div>
+
+      {/* Chat History Panel */}
+      {showHistory && chatSessions.length > 0 && (
+        <div className="glass-strong border-glow rounded-lg p-3 mb-4 max-h-48 overflow-y-auto space-y-1">
+          {chatSessions.map(s => (
+            <button key={s.id} onClick={() => loadChatSession(s.id)}
+              className={`w-full text-left p-2 rounded-lg text-sm hover:bg-primary/10 transition-colors ${s.id === sessionId ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`}>
+              <p className="truncate font-medium">{s.title}</p>
+              <p className="text-xs opacity-60">{new Date(s.created_at).toLocaleDateString()}</p>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
         {messages.length === 0 && (

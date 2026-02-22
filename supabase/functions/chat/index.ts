@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 serve(async (req) => {
@@ -15,32 +15,34 @@ serve(async (req) => {
 
     let systemPrompt = `You are an advanced engineering intelligence system inside the Lumexa platform.
 
-Your role is to analyze structured engineering design data, telemetry, and project context to provide professional technical insights.
+Your role is to analyze structured engineering design data, telemetry, sensor data, and project context to provide professional technical insights.
 
 You are an expert multidisciplinary engineering advisor specializing in:
 • Mechanical Engineering
 • Robotics Systems
 • Automotive Engineering
-• IoT Hardware Design
+• IoT Hardware Design & Sensors
 • Aerodynamics
 • Structural Analysis
 • Thermal Management
 • Sensor Data Interpretation
+• Anomaly Detection & Predictive Maintenance
 
 ANALYSIS BEHAVIOR:
-• Interpret engineering parameters logically
+• Interpret engineering parameters logically based on units
 • Identify possible design flaws or inefficiencies
 • Evaluate performance feasibility
 • Check safety and thermal limits
 • Assess structural stability risks
 • Identify unrealistic values or sensor anomalies
 • Suggest optimization strategies
+• Detect anomalies in sensor data and predict maintenance needs
 
 RESPONSE FORMAT - Always structure responses with:
-1. **Design Overview** — Summarize what you detect from the data
-2. **Performance Insights** — Expected behavior and capabilities
-3. **Risk Detection** — Potential failures, safety concerns, unrealistic values
-4. **Optimization Recommendations** — Clear engineering improvements
+1. **Overview** — Summarize what you detect from the data
+2. **Insights** — Expected behavior and capabilities
+3. **Risks** — Potential failures, safety concerns, unrealistic values
+4. **Optimization** — Clear engineering improvements
 5. **Next Steps** — Actionable actions for the user
 
 IMPORTANT RULES:
@@ -63,15 +65,18 @@ Use this project context to tailor your analysis and recommendations.`;
     }
 
     if (telemetryStats) {
-      systemPrompt += `\n\nCURRENT TELEMETRY DATA:
-• Max Speed: ${telemetryStats.maxSpeed} km/h
-• Avg Speed: ${telemetryStats.avgSpeed} km/h
-• Max Acceleration: ${telemetryStats.maxAcceleration} g
-• Avg Acceleration: ${telemetryStats.avgAcceleration} g
-• Max Temperature: ${telemetryStats.maxTemperature}°C
-• Avg Temperature: ${telemetryStats.avgTemperature}°C
-• Session Duration: ${telemetryStats.totalTime}s
-• Data Points: ${telemetryStats.dataPoints}`;
+      systemPrompt += `\n\nCURRENT TELEMETRY DATA:`;
+      if (telemetryStats.rowCount) {
+        systemPrompt += `\n• Data Points: ${telemetryStats.rowCount}`;
+      }
+      if (telemetryStats.columns) {
+        systemPrompt += `\n• Columns: ${telemetryStats.columns.join(', ')}`;
+      }
+      if (telemetryStats.summary) {
+        for (const [col, s] of Object.entries(telemetryStats.summary) as [string, any][]) {
+          systemPrompt += `\n• ${col}: min=${s.min}, max=${s.max}, avg=${s.avg?.toFixed?.(2) || s.avg}${s.unit ? ` (${s.unit})` : ''}`;
+        }
+      }
     }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

@@ -7,35 +7,34 @@ import {
   AreaChart, Area, BarChart, Bar, ReferenceLine
 } from 'recharts';
 
-type Metric = 'speed' | 'acceleration' | 'temperature';
-
-const metricConfig: Record<Metric, { color: string; unit: string; label: string }> = {
-  speed: { color: 'hsl(200, 85%, 55%)', unit: 'km/h', label: 'Speed' },
-  acceleration: { color: 'hsl(0, 85%, 55%)', unit: 'g', label: 'Acceleration' },
-  temperature: { color: 'hsl(30, 95%, 55%)', unit: '°C', label: 'Temperature' },
-};
+const CHART_COLORS = [
+  'hsl(0, 85%, 55%)', 'hsl(200, 85%, 55%)', 'hsl(30, 95%, 55%)',
+  'hsl(145, 65%, 42%)', 'hsl(270, 70%, 60%)', 'hsl(50, 90%, 55%)',
+];
 
 export default function AnalysisPage() {
   const { data, stats } = useTelemetry();
-  const [activeMetric, setActiveMetric] = useState<Metric>('speed');
+  const [activeMetric, setActiveMetric] = useState<string | null>(null);
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>('area');
 
-  if (!stats) {
+  if (!stats || stats.numericColumns.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
         <BarChart3 className="w-16 h-16 text-muted-foreground/30" />
         <p className="text-muted-foreground">Upload data to see analysis</p>
         <Link to="/upload" className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
-          <Upload className="w-4 h-4" /> Upload CSV
+          <Upload className="w-4 h-4" /> Upload Data
         </Link>
       </div>
     );
   }
 
+  const metric = activeMetric || stats.numericColumns[0];
   const chartData = data.slice(0, 500);
-  const cfg = metricConfig[activeMetric];
-  const maxVal = activeMetric === 'speed' ? stats.maxSpeed : activeMetric === 'acceleration' ? stats.maxAcceleration : stats.maxTemperature;
-  const avgVal = activeMetric === 'speed' ? stats.avgSpeed : activeMetric === 'acceleration' ? stats.avgAcceleration : stats.avgTemperature;
+  const s = stats.summary[metric];
+  const xCol = stats.numericColumns[0] !== metric ? stats.numericColumns[0] : (stats.numericColumns[1] || stats.columns[0]);
+  const colorIdx = stats.numericColumns.indexOf(metric);
+  const color = CHART_COLORS[colorIdx % CHART_COLORS.length];
 
   const tooltipStyle = {
     contentStyle: { background: 'hsl(220, 18%, 12%)', border: '1px solid hsl(220, 15%, 20%)', borderRadius: 8, fontSize: 12 },
@@ -43,43 +42,44 @@ export default function AnalysisPage() {
   };
 
   const renderChart = () => {
-    const common = {
-      data: chartData,
-      children: [
-        <CartesianGrid key="g" strokeDasharray="3 3" stroke="hsl(220, 15%, 18%)" />,
-        <XAxis key="x" dataKey="time" stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} label={{ value: 'Time (s)', position: 'insideBottom', offset: -5, fill: 'hsl(220, 10%, 40%)', fontSize: 11 }} />,
-        <YAxis key="y" stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} label={{ value: `${cfg.label} (${cfg.unit})`, angle: -90, position: 'insideLeft', fill: 'hsl(220, 10%, 40%)', fontSize: 11 }} />,
-        <Tooltip key="t" {...tooltipStyle} />,
-        <ReferenceLine key="avg" y={avgVal} stroke={cfg.color} strokeDasharray="5 5" strokeOpacity={0.5} label={{ value: `Avg: ${avgVal.toFixed(2)}`, fill: cfg.color, fontSize: 10 }} />,
-      ],
-    };
-
     if (chartType === 'bar') {
       return (
-        <BarChart data={common.data}>
-          {common.children}
-          <Bar dataKey={activeMetric} fill={cfg.color} fillOpacity={0.7} radius={[2, 2, 0, 0]} />
+        <BarChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 15%, 18%)" />
+          <XAxis dataKey={xCol} stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
+          <YAxis stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
+          <Tooltip {...tooltipStyle} />
+          <ReferenceLine y={s?.avg} stroke={color} strokeDasharray="5 5" strokeOpacity={0.5} />
+          <Bar dataKey={metric} fill={color} fillOpacity={0.7} radius={[2, 2, 0, 0]} />
         </BarChart>
       );
     }
     if (chartType === 'area') {
       return (
-        <AreaChart data={common.data}>
+        <AreaChart data={chartData}>
           <defs>
             <linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={cfg.color} stopOpacity={0.3} />
-              <stop offset="100%" stopColor={cfg.color} stopOpacity={0} />
+              <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
             </linearGradient>
           </defs>
-          {common.children}
-          <Area type="monotone" dataKey={activeMetric} stroke={cfg.color} fill="url(#aGrad)" strokeWidth={2} dot={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 15%, 18%)" />
+          <XAxis dataKey={xCol} stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
+          <YAxis stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
+          <Tooltip {...tooltipStyle} />
+          <ReferenceLine y={s?.avg} stroke={color} strokeDasharray="5 5" strokeOpacity={0.5} />
+          <Area type="monotone" dataKey={metric} stroke={color} fill="url(#aGrad)" strokeWidth={2} dot={false} />
         </AreaChart>
       );
     }
     return (
-      <LineChart data={common.data}>
-        {common.children}
-        <Line type="monotone" dataKey={activeMetric} stroke={cfg.color} strokeWidth={2} dot={false} />
+      <LineChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 15%, 18%)" />
+        <XAxis dataKey={xCol} stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
+        <YAxis stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
+        <Tooltip {...tooltipStyle} />
+        <ReferenceLine y={s?.avg} stroke={color} strokeDasharray="5 5" strokeOpacity={0.5} />
+        <Line type="monotone" dataKey={metric} stroke={color} strokeWidth={2} dot={false} />
       </LineChart>
     );
   };
@@ -88,41 +88,39 @@ export default function AnalysisPage() {
     <div className="space-y-5 animate-slide-up">
       <h2 className="text-xl font-bold">Analysis</h2>
 
-      {/* Controls */}
+      {/* Metric Selection */}
       <div className="flex flex-wrap gap-2">
-        {(Object.keys(metricConfig) as Metric[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => setActiveMetric(m)}
+        {stats.numericColumns.map((col, i) => (
+          <button key={col} onClick={() => setActiveMetric(col)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeMetric === m ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-            }`}
-          >
-            {metricConfig[m].label}
+              metric === col ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+            }`}>
+            {col}{stats.summary[col]?.unit ? ` (${stats.summary[col].unit})` : ''}
           </button>
         ))}
         <div className="ml-auto flex gap-1">
           {(['area', 'line', 'bar'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setChartType(t)}
+            <button key={t} onClick={() => setChartType(t)}
               className={`px-3 py-1.5 rounded-md text-xs capitalize transition-colors ${
                 chartType === t ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
+              }`}>
               {t}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Peak info */}
-      <div className="flex items-center gap-4 text-sm">
-        <span className="text-muted-foreground">Peak:</span>
-        <span className="data-display font-bold" style={{ color: cfg.color }}>{maxVal.toFixed(2)} {cfg.unit}</span>
-        <span className="text-muted-foreground">Avg:</span>
-        <span className="data-display">{avgVal.toFixed(2)} {cfg.unit}</span>
-      </div>
+      {/* Stats */}
+      {s && (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-muted-foreground">Peak:</span>
+          <span className="data-display font-bold" style={{ color }}>{s.max.toFixed(2)} {s.unit || ''}</span>
+          <span className="text-muted-foreground">Avg:</span>
+          <span className="data-display">{s.avg.toFixed(2)} {s.unit || ''}</span>
+          <span className="text-muted-foreground">Min:</span>
+          <span className="data-display">{s.min.toFixed(2)} {s.unit || ''}</span>
+        </div>
+      )}
 
       {/* Chart */}
       <div className="gradient-card border border-border rounded-lg p-4">
