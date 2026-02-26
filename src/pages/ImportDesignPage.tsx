@@ -1,15 +1,11 @@
 import { useState, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import ReactMarkdown from 'react-markdown';
 import {
-  Upload, FileText, Image, Send, Loader2, ChevronRight,
-  Shield, Lightbulb, AlertTriangle, BarChart3, ArrowRight, Sparkles
+  Upload, FileText, Image, ChevronRight, Lightbulb
 } from 'lucide-react';
 
 const cadSoftware = [
@@ -63,7 +59,7 @@ const exportGuidelines: Record<string, { steps: string[]; formats: string }> = {
     formats: 'STEP, IGES, 3DM',
   },
   'Tinkercad': {
-    steps: ['Open your design in Tinkercad', 'Click Export in the top-right', 'Choose STL or OBJ format', 'Download the file to your computer', 'Upload it here for analysis'],
+    steps: ['Open your design in Tinkercad', 'Click Export in the top-right', 'Choose STL or OBJ format', 'Download the file to your computer', 'Upload it here'],
     formats: 'STL, OBJ',
   },
 };
@@ -71,116 +67,14 @@ const exportGuidelines: Record<string, { steps: string[]; formats: string }> = {
 const ACCEPTED_FILES = '.step,.stp,.iges,.igs,.stl,.json,.xml,.csv,.gltf,.glb,.fbx';
 const ACCEPTED_IMAGES = 'image/png,image/jpeg,image/webp';
 
-interface AnalysisResult {
-  content: string;
-}
-
 export default function ImportDesignPage() {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [software, setSoftware] = useState('');
   const [structuredData, setStructuredData] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
-
-  const handleAnalyze = async () => {
-    if (!structuredData.trim() && !uploadedFile) {
-      toast({ title: 'Please provide design data or upload a file', variant: 'destructive' });
-      return;
-    }
-
-    setAnalyzing(true);
-    setResult(null);
-
-    try {
-      // Fetch project context
-      const { data: projects } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const project = projects?.[0];
-
-      let fileContent = '';
-      if (uploadedFile) {
-        fileContent = await uploadedFile.text();
-      }
-
-      const inputPayload = {
-        messages: [
-          {
-            role: 'user' as const,
-            content: `Analyze the following engineering design data:
-
-${software ? `**CAD Software Used:** ${software}` : ''}
-
-${structuredData ? `**Structured Data:**\n\`\`\`\n${structuredData}\n\`\`\`` : ''}
-
-${fileContent ? `**Uploaded File Content (${uploadedFile?.name}):**\n\`\`\`\n${fileContent.slice(0, 10000)}\n\`\`\`` : ''}
-
-${uploadedImage ? `**Note:** User also attached a design image: ${uploadedImage.name}` : ''}
-
-Please provide a comprehensive engineering analysis.`,
-          },
-        ],
-        projectContext: project ? {
-          name: project.project_name,
-          category: project.category,
-          purpose: project.purpose,
-          budget: project.budget_range,
-          complexity: project.complexity,
-          description: project.description,
-        } : null,
-        telemetryStats: null,
-      };
-
-      const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-      const resp = await fetch(CHAT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify(inputPayload),
-      });
-
-      if (!resp.ok) throw new Error('Analysis failed');
-
-      const reader = resp.body!.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              fullText += content;
-              setResult({ content: fullText });
-            }
-          } catch {}
-        }
-      }
-    } catch (err: any) {
-      toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   const guide = software ? exportGuidelines[software] : null;
 
@@ -193,7 +87,7 @@ Please provide a comprehensive engineering analysis.`,
         </div>
         <div>
           <h2 className="text-xl font-bold font-display tracking-wide">Import Design Data</h2>
-          <p className="text-sm text-muted-foreground">Select your CAD software, export data, and submit for analysis</p>
+          <p className="text-sm text-muted-foreground">Select your CAD software and export your design data</p>
         </div>
       </div>
 
@@ -250,7 +144,6 @@ Please provide a comprehensive engineering analysis.`,
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Design Data Input</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Structured Data Text Box */}
           <div>
             <label className="text-sm text-muted-foreground mb-1.5 block">Structured Data</label>
             <Textarea
@@ -262,7 +155,6 @@ Please provide a comprehensive engineering analysis.`,
             />
           </div>
 
-          {/* File & Image Upload */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div
               onClick={() => fileRef.current?.click()}
@@ -294,33 +186,8 @@ Please provide a comprehensive engineering analysis.`,
               </div>
             </div>
           </div>
-
-          {/* Submit */}
-          <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red">
-            {analyzing ? (
-              <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Analyzing...</>
-            ) : (
-              <><Send className="w-4 h-4 mr-2" /> Submit for Analysis</>
-            )}
-          </Button>
         </CardContent>
       </Card>
-
-      {/* Analysis Results */}
-      {result && (
-        <div className="space-y-4 animate-slide-up">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <h3 className="text-lg font-bold font-display tracking-wide">Analysis Results</h3>
-          </div>
-
-          <Card className="glass-strong border-glow">
-            <CardContent className="pt-6 prose prose-sm prose-invert max-w-none">
-              <ReactMarkdown>{result.content}</ReactMarkdown>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
