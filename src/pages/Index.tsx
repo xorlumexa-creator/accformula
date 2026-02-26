@@ -6,7 +6,7 @@ import MetricCard from '@/components/MetricCard';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Gauge, Zap, Thermometer, Clock, Database, Activity,
-  Upload, FileInput, MessageSquare, Timer, Radio, BarChart3
+  Upload, FileInput, Timer, Radio, BarChart3
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 
@@ -15,7 +15,6 @@ const navCards = [
   { to: '/import-design', icon: FileInput, label: 'Design Import', desc: 'CAD data & analysis' },
   { to: '/sensors', icon: Radio, label: 'Sensors', desc: 'IoT sensor integration' },
   { to: '/analysis', icon: BarChart3, label: 'Analysis', desc: 'Charts & metrics' },
-  { to: '/chat', icon: MessageSquare, label: 'AI Chat', desc: 'Engineering assistant' },
   { to: '/lap-calculator', icon: Timer, label: 'Lap Calculator', desc: 'Track lap times' },
 ];
 

@@ -8,10 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import ReactMarkdown from 'react-markdown';
 import {
-  Radio, Upload, Wifi, WifiOff, Activity, AlertTriangle,
-  ChevronDown, ChevronUp, Send, Loader2, Sparkles, Plus, Trash2
+  Radio, Upload, Loader2, ChevronDown, ChevronUp, Plus
 } from 'lucide-react';
 
 const sensorTypes = ['Speed', 'Temperature', 'Pressure', 'RPM', 'Vibration', 'Voltage', 'Current', 'Humidity', 'Custom'];
@@ -36,11 +34,9 @@ const deviceGuidelines: Record<string, string[]> = {
   'F1 Sensor Pod': ['Connect via CAN bus interface', 'Use standard F1 telemetry protocol', 'Ensure high-speed logging at 1kHz+', 'Sync timestamps across all channels'],
 };
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-
 export default function SensorIntegrationPage() {
   const { user } = useAuth();
-  const { uploadCSV, uploadText } = useTelemetry();
+  const { uploadCSV } = useTelemetry();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -53,18 +49,12 @@ export default function SensorIntegrationPage() {
 
   const [pasteData, setPasteData] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
-
-  // Sensor configs from DB
-  const [sensors, setSensors] = useState<any[]>([]);
   const [savingSensor, setSavingSensor] = useState(false);
 
   const handleFileUpload = useCallback((file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (['csv', 'txt', 'json'].includes(ext || '')) {
       setUploadedFile(file);
-      // Also feed to telemetry context
       if (ext === 'csv' || ext === 'txt') {
         uploadCSV(file);
       }
@@ -72,82 +62,6 @@ export default function SensorIntegrationPage() {
       toast({ title: 'Unsupported file format. Use CSV, JSON, or TXT.', variant: 'destructive' });
     }
   }, [uploadCSV, toast]);
-
-  const handleAnalyze = async () => {
-    if (!pasteData.trim() && !uploadedFile) {
-      toast({ title: 'Provide sensor data or upload a file first', variant: 'destructive' });
-      return;
-    }
-
-    setAnalyzing(true);
-    setAnalysisResult(null);
-
-    try {
-      let fileContent = '';
-      if (uploadedFile) fileContent = await uploadedFile.text();
-
-      const content = `Analyze this sensor/telemetry data for anomalies, predictions, and recommendations:
-
-${sensorType ? `**Sensor Type:** ${sensorType}` : ''}
-${unit ? `**Unit:** ${unit}` : ''}
-${connectionType ? `**Connection:** ${connectionType}` : ''}
-
-${pasteData ? `**Data:**\n\`\`\`\n${pasteData}\n\`\`\`` : ''}
-${fileContent ? `**File (${uploadedFile?.name}):**\n\`\`\`\n${fileContent.slice(0, 10000)}\n\`\`\`` : ''}
-
-Focus on: anomaly detection, threshold alerts, predictive maintenance, and optimization recommendations.`;
-
-      // Fetch project context
-      const { data: projects } = await supabase
-        .from('projects').select('*').eq('user_id', user!.id)
-        .order('created_at', { ascending: false }).limit(1);
-      const project = projects?.[0];
-
-      const resp = await fetch(CHAT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages: [{ role: 'user', content }],
-          projectContext: project ? {
-            name: project.project_name, category: project.category,
-            purpose: project.purpose, budget: project.budget_range,
-            complexity: project.complexity, description: project.description,
-          } : null,
-          telemetryStats: null,
-        }),
-      });
-
-      if (!resp.ok) throw new Error('Analysis failed');
-
-      const reader = resp.body!.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const c = parsed.choices?.[0]?.delta?.content;
-            if (c) { fullText += c; setAnalysisResult(fullText); }
-          } catch {}
-        }
-      }
-    } catch (err: any) {
-      toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   const saveSensorConfig = async () => {
     if (!sensorType) { toast({ title: 'Select a sensor type', variant: 'destructive' }); return; }
@@ -302,7 +216,6 @@ Focus on: anomaly detection, threshold alerts, predictive maintenance, and optim
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">File Upload / Data Input</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Drop zone */}
           <div onClick={() => fileRef.current?.click()}
             className="flex items-center gap-3 p-6 rounded-lg bg-background/30 border-2 border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group text-center justify-center">
             <input ref={fileRef} type="file" accept=".csv,.json,.txt" className="hidden"
@@ -314,44 +227,18 @@ Focus on: anomaly detection, threshold alerts, predictive maintenance, and optim
             </div>
           </div>
 
-          {/* Paste area */}
           <Textarea value={pasteData} onChange={e => setPasteData(e.target.value)}
             placeholder={sampleJSON}
             className="min-h-[120px] bg-background/50 border-border/50 font-mono text-xs" rows={6} />
 
-          {/* Telemetry Preview */}
           {pasteData.trim() && (
             <div className="glass rounded-lg p-3">
               <h4 className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Preview</h4>
               <pre className="text-xs font-mono text-foreground/70 overflow-x-auto max-h-32">{pasteData.slice(0, 500)}</pre>
             </div>
           )}
-
-          {/* Submit */}
-          <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red">
-            {analyzing ? (
-              <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Analyzing Sensor Data...</>
-            ) : (
-              <><Send className="w-4 h-4 mr-2" /> Analyze with AI</>
-            )}
-          </Button>
         </CardContent>
       </Card>
-
-      {/* Analysis Results */}
-      {analysisResult && (
-        <div className="space-y-4 animate-slide-up">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <h3 className="text-lg font-bold font-display tracking-wide">Sensor Analysis</h3>
-          </div>
-          <Card className="glass-strong border-glow">
-            <CardContent className="pt-6 prose prose-sm prose-invert max-w-none">
-              <ReactMarkdown>{analysisResult}</ReactMarkdown>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
