@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,8 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import ReactMarkdown from 'react-markdown';
 import {
-  Upload, FileText, Image, Send, Loader2, ChevronRight, Lightbulb, Sparkles
+  Upload, FileText, Image, Send, Loader2, ChevronRight, Lightbulb, Sparkles,
 } from 'lucide-react';
+import CADViewer from '@/components/CADViewer';
 
 const cadSoftware = [
   'Fusion 360', 'Blender', 'SolidWorks', 'AutoCAD', 'CATIA',
@@ -31,7 +32,8 @@ const exportGuidelines: Record<string, { steps: string[]; formats: string }> = {
   'Tinkercad': { steps: ['Open your design in Tinkercad', 'Click Export in the top-right', 'Choose STL or OBJ format', 'Download the file to your computer', 'Upload it here'], formats: 'STL, OBJ' },
 };
 
-const ACCEPTED_FILES = '.step,.stp,.iges,.igs,.stl,.json,.xml,.csv,.gltf,.glb,.fbx';
+const VIEWER_FORMATS = ['stl', 'obj', 'gltf', 'glb'];
+const ACCEPTED_FILES = '.step,.stp,.iges,.igs,.stl,.obj,.json,.xml,.csv,.gltf,.glb,.fbx';
 const ACCEPTED_IMAGES = 'image/png,image/jpeg,image/webp';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
@@ -48,6 +50,44 @@ export default function ImportDesignPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
+
+  // 3D viewer state
+  const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [modelType, setModelType] = useState<string | null>(null);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const modelInputRef = useRef<HTMLInputElement>(null);
+
+  const getFileExt = (name: string) => name.split('.').pop()?.toLowerCase() || '';
+
+  const loadModel = useCallback((file: File) => {
+    const ext = getFileExt(file.name);
+    if (!VIEWER_FORMATS.includes(ext)) {
+      toast({ title: `Unsupported 3D format: .${ext}`, description: 'Use STL, OBJ, GLTF, or GLB', variant: 'destructive' });
+      return;
+    }
+    setModelLoading(true);
+    // Revoke old URL
+    if (modelUrl) URL.revokeObjectURL(modelUrl);
+    const url = URL.createObjectURL(file);
+    setModelUrl(url);
+    setModelType(ext);
+    setUploadedFile(file);
+    // Give Three.js a moment
+    setTimeout(() => setModelLoading(false), 300);
+  }, [modelUrl, toast]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) loadModel(file);
+  }, [loadModel]);
+
+  const handleModelInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) loadModel(file);
+  };
 
   const handleAnalyze = async () => {
     if (!structuredData.trim() && !uploadedFile) {
@@ -124,110 +164,173 @@ export default function ImportDesignPage() {
   const guide = software ? exportGuidelines[software] : null;
 
   return (
-    <div className="space-y-6 animate-slide-up max-w-4xl mx-auto">
+    <div className="space-y-6 animate-slide-up">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center border-glow">
           <FileText className="w-5 h-5 text-primary" />
         </div>
         <div>
           <h2 className="text-xl font-bold font-display tracking-wide">Import Design Data</h2>
-          <p className="text-sm text-muted-foreground">Select your CAD software, export data, and submit for analysis</p>
+          <p className="text-sm text-muted-foreground">Upload 3D models, export data, and submit for AI analysis</p>
         </div>
       </div>
 
-      <Card className="glass-strong border-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Select CAD Software</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Select value={software} onValueChange={setSoftware}>
-            <SelectTrigger className="bg-background/50 border-border/50">
-              <SelectValue placeholder="Select the software used to create your design" />
-            </SelectTrigger>
-            <SelectContent>
-              {cadSoftware.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
+      {/* Split layout: Viewer + Controls */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* LEFT — 3D Viewer */}
+        <div className="space-y-3">
+          {/* Drop zone / Viewer */}
+          <div
+            className={`relative transition-all ${dragOver ? 'ring-2 ring-primary' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+          >
+            <CADViewer
+              fileUrl={modelUrl}
+              fileType={modelType}
+              loading={modelLoading}
+              className="h-[450px] lg:h-[520px]"
+            />
 
-      {guide && (
-        <Card className="glass border-glow animate-slide-up">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Lightbulb className="w-4 h-4 text-primary" />
-              <span className="uppercase tracking-wider text-muted-foreground">Export Guide — {software}</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2">
-              {guide.steps.map((step, i) => (
-                <div key={i} className="flex items-start gap-3 text-sm">
-                  <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
-                  <span className="text-foreground/80">{step}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
-              <ChevronRight className="w-3 h-3" />
-              Supported formats: <span className="text-primary font-medium">{guide.formats}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="glass-strong border-glow">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Design Data Input</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm text-muted-foreground mb-1.5 block">Structured Data</label>
-            <Textarea value={structuredData} onChange={(e) => setStructuredData(e.target.value)}
-              placeholder="Paste structured data, JSON, STEP metadata, or exported design parameters here..."
-              className="min-h-[140px] bg-background/50 border-border/50 font-mono text-xs" rows={8} />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-3 p-4 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group">
-              <input ref={fileRef} type="file" accept={ACCEPTED_FILES} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setUploadedFile(f); }} />
-              <Upload className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{uploadedFile ? uploadedFile.name : 'Upload Design File'}</p>
-                <p className="text-xs text-muted-foreground">STEP, IGES, STL, JSON, XML, CSV, glTF, FBX</p>
+            {/* Drag overlay */}
+            {dragOver && (
+              <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center z-20">
+                <p className="text-primary font-semibold">Drop 3D file here</p>
               </div>
-            </div>
-            <div onClick={() => imageRef.current?.click()}
-              className="flex items-center gap-3 p-4 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group">
-              <input ref={imageRef} type="file" accept={ACCEPTED_IMAGES} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setUploadedImage(f); }} />
-              <Image className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{uploadedImage ? uploadedImage.name : 'Attach Screenshot'}</p>
-                <p className="text-xs text-muted-foreground">PNG, JPEG, WebP design previews</p>
-              </div>
-            </div>
+            )}
           </div>
 
-          <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red">
-            {analyzing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Analyzing...</> : <><Send className="w-4 h-4 mr-2" /> Submit for Analysis</>}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {result && (
-        <div className="space-y-4 animate-slide-up">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <h3 className="text-lg font-bold font-display tracking-wide">Analysis Results</h3>
+          {/* Upload button */}
+          <div className="flex gap-2">
+            <input
+              ref={modelInputRef}
+              type="file"
+              accept=".stl,.obj,.gltf,.glb"
+              className="hidden"
+              onChange={handleModelInput}
+            />
+            <Button
+              variant="outline"
+              className="flex-1 gap-2"
+              onClick={() => modelInputRef.current?.click()}
+            >
+              <Upload className="w-4 h-4" />
+              {uploadedFile ? uploadedFile.name : 'Upload 3D Model (STL, OBJ, GLTF, GLB)'}
+            </Button>
           </div>
+
+          {/* Disclaimer */}
+          <p className="text-[10px] text-muted-foreground/50 text-center">
+            3D visualization is for reference only. Critical zone highlighting is based on AI analysis of provided data.
+          </p>
+        </div>
+
+        {/* RIGHT — Controls + Results */}
+        <div className="space-y-4">
+          {/* Software selector */}
           <Card className="glass-strong border-glow">
-            <CardContent className="pt-6 prose prose-sm prose-invert max-w-none">
-              <ReactMarkdown>{result.content}</ReactMarkdown>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Select CAD Software</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Select value={software} onValueChange={setSoftware}>
+                <SelectTrigger className="bg-background/50 border-border/50">
+                  <SelectValue placeholder="Select the software used" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cadSoftware.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </CardContent>
           </Card>
+
+          {/* Export guide */}
+          {guide && (
+            <Card className="glass border-glow animate-slide-up">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Lightbulb className="w-4 h-4 text-primary" />
+                  <span className="uppercase tracking-wider text-muted-foreground">Export Guide — {software}</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  {guide.steps.map((step, i) => (
+                    <div key={i} className="flex items-start gap-3 text-sm">
+                      <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                      <span className="text-foreground/80">{step}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
+                  <ChevronRight className="w-3 h-3" />
+                  Supported: <span className="text-primary font-medium">{guide.formats}</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Data input */}
+          <Card className="glass-strong border-glow">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Design Data Input</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={structuredData}
+                onChange={e => setStructuredData(e.target.value)}
+                placeholder="Paste structured data, JSON, STEP metadata, or exported design parameters…"
+                className="min-h-[100px] bg-background/50 border-border/50 font-mono text-xs"
+                rows={5}
+              />
+
+              <div className="grid grid-cols-2 gap-2">
+                <div
+                  onClick={() => fileRef.current?.click()}
+                  className="flex items-center gap-2 p-3 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group"
+                >
+                  <input ref={fileRef} type="file" accept={ACCEPTED_FILES} className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadedFile(f); }} />
+                  <Upload className="w-4 h-4 text-muted-foreground group-hover:text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate">{uploadedFile ? uploadedFile.name : 'Upload File'}</p>
+                  </div>
+                </div>
+                <div
+                  onClick={() => imageRef.current?.click()}
+                  className="flex items-center gap-2 p-3 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group"
+                >
+                  <input ref={imageRef} type="file" accept={ACCEPTED_IMAGES} className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadedImage(f); }} />
+                  <Image className="w-4 h-4 text-muted-foreground group-hover:text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate">{uploadedImage ? uploadedImage.name : 'Screenshot'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red">
+                {analyzing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Analyzing…</> : <><Send className="w-4 h-4 mr-2" /> Submit for Analysis</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Analysis Results */}
+          {result && (
+            <div className="space-y-3 animate-slide-up">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-primary" />
+                <h3 className="text-base font-bold font-display tracking-wide">Analysis Results</h3>
+              </div>
+              <Card className="glass-strong border-glow">
+                <CardContent className="pt-5 prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown>{result.content}</ReactMarkdown>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
