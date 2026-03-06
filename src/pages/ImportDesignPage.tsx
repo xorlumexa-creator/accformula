@@ -177,7 +177,7 @@ export default function ImportDesignPage() {
       return {
         name: col,
         temperature: temp,
-        position: { x: (frac - 0.5) * w * 0.8, y: 0, z: 0 } as any,
+        position: new THREE.Vector3((frac - 0.5) * w * 0.8, 0, 0),
         mapped: true,
       };
     });
