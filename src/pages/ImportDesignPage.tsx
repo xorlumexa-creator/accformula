@@ -98,6 +98,8 @@ export default function ImportDesignPage() {
     }
     setAnalyzing(true);
     setResult(null);
+    setAnnotations([]);
+    setSelectedAnnotation(null);
 
     try {
       const { data: projects } = await supabase
@@ -160,6 +162,16 @@ export default function ImportDesignPage() {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
       setAnalyzing(false);
+      // Parse annotations from final result
+      if (result?.content) {
+        try {
+          const match = result.content.match(/```annotations-json\s*([\s\S]*?)```/);
+          if (match) {
+            const parsed = JSON.parse(match[1]);
+            if (parsed.annotations) setAnnotations(parsed.annotations);
+          }
+        } catch { /* ignore parse errors */ }
+      }
     }
   };
 
