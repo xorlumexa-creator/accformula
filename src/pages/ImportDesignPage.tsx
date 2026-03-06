@@ -205,6 +205,9 @@ export default function ImportDesignPage() {
               fileType={modelType}
               loading={modelLoading}
               className="h-[450px] lg:h-[520px]"
+              annotations={annotations}
+              selectedAnnotation={selectedAnnotation}
+              onSelectAnnotation={setSelectedAnnotation}
             />
 
             {/* Drag overlay */}
