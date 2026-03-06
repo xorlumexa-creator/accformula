@@ -173,16 +173,10 @@ export default function ImportDesignPage() {
     const sensors: HeatSensor[] = tempCols.map((col, i) => {
       const temp = parseFloat(String(lastRow[col])) || 25;
       const frac = tempCols.length > 1 ? i / (tempCols.length - 1) : 0.5;
-      const pos = new (window as any).THREE?.Vector3?.(
-        (frac - 0.5) * w * 0.8,
-        0,
-        0,
-      );
-      // fallback to a simple vector
       return {
         name: col,
         temperature: temp,
-        position: pos || { x: (frac - 0.5) * w * 0.8, y: 0, z: 0 } as any,
+        position: { x: (frac - 0.5) * w * 0.8, y: 0, z: 0 } as any,
         mapped: true,
       };
     });
