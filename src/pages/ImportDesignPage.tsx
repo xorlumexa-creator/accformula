@@ -10,7 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import {
   Upload, FileText, Image, Send, Loader2, ChevronRight, Lightbulb, Sparkles,
 } from 'lucide-react';
-import CADViewer from '@/components/CADViewer';
+import CADViewer, { type Annotation } from '@/components/CADViewer';
 
 const cadSoftware = [
   'Fusion 360', 'Blender', 'SolidWorks', 'AutoCAD', 'CATIA',
