@@ -10,7 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import {
   Upload, FileText, Image, Send, Loader2, ChevronRight, Lightbulb, Sparkles,
 } from 'lucide-react';
-import CADViewer from '@/components/CADViewer';
+import CADViewer, { type Annotation } from '@/components/CADViewer';
 
 const cadSoftware = [
   'Fusion 360', 'Blender', 'SolidWorks', 'AutoCAD', 'CATIA',
@@ -37,7 +37,7 @@ const ACCEPTED_FILES = '.step,.stp,.iges,.igs,.stl,.obj,.json,.xml,.csv,.gltf,.g
 const ACCEPTED_IMAGES = 'image/png,image/jpeg,image/webp';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-interface AnalysisResult { content: string; }
+interface AnalysisResult { content: string; annotations?: Annotation[]; }
 
 export default function ImportDesignPage() {
   const { user } = useAuth();
@@ -56,6 +56,8 @@ export default function ImportDesignPage() {
   const [modelType, setModelType] = useState<string | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<number | null>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
 
   const getFileExt = (name: string) => name.split('.').pop()?.toLowerCase() || '';
@@ -96,6 +98,8 @@ export default function ImportDesignPage() {
     }
     setAnalyzing(true);
     setResult(null);
+    setAnnotations([]);
+    setSelectedAnnotation(null);
 
     try {
       const { data: projects } = await supabase
@@ -154,6 +158,15 @@ export default function ImportDesignPage() {
           }
         }
       }
+
+      // Parse annotations from completed text
+      try {
+        const match = fullText.match(/```annotations-json\s*([\s\S]*?)```/);
+        if (match) {
+          const parsed = JSON.parse(match[1]);
+          if (parsed.annotations) setAnnotations(parsed.annotations);
+        }
+      } catch { /* ignore parse errors */ }
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
@@ -192,6 +205,9 @@ export default function ImportDesignPage() {
               fileType={modelType}
               loading={modelLoading}
               className="h-[450px] lg:h-[520px]"
+              annotations={annotations}
+              selectedAnnotation={selectedAnnotation}
+              onSelectAnnotation={setSelectedAnnotation}
             />
 
             {/* Drag overlay */}
