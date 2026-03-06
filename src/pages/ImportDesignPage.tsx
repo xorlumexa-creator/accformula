@@ -37,7 +37,7 @@ const ACCEPTED_FILES = '.step,.stp,.iges,.igs,.stl,.obj,.json,.xml,.csv,.gltf,.g
 const ACCEPTED_IMAGES = 'image/png,image/jpeg,image/webp';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-interface AnalysisResult { content: string; }
+interface AnalysisResult { content: string; annotations?: Annotation[]; }
 
 export default function ImportDesignPage() {
   const { user } = useAuth();
@@ -56,6 +56,8 @@ export default function ImportDesignPage() {
   const [modelType, setModelType] = useState<string | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<number | null>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
 
   const getFileExt = (name: string) => name.split('.').pop()?.toLowerCase() || '';
