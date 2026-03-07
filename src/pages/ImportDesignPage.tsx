@@ -9,13 +9,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import ReactMarkdown from 'react-markdown';
 import {
   Upload, FileText, Image, Send, Loader2, ChevronRight, ChevronDown, Lightbulb, Sparkles, Thermometer,
-  Triangle, Ruler, AlertTriangle, Shield, Box, Crosshair,
+  Triangle, Ruler, AlertTriangle, Shield, Box, Crosshair, Search, ChevronUp,
 } from 'lucide-react';
-import CADViewer, { type Annotation, type STLData, type HeatSensor } from '@/components/CADViewer';
+import CADViewer, { type Annotation, type STLData, type HeatSensor, type GeometryZone, ZONE_CONFIG } from '@/components/CADViewer';
 import { useTelemetry } from '@/context/TelemetryContext';
 import Papa from 'papaparse';
 
@@ -54,6 +55,14 @@ const ANALYSIS_MESSAGES = [
 
 const TEMP_PATTERNS = /temp|temperature|thermal|heat|celsius|fahrenheit|kelvin|°c|°f|t_/i;
 
+const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+const SEVERITY_STYLES: Record<string, { bg: string; border: string; text: string }> = {
+  CRITICAL: { bg: 'bg-destructive/10', border: 'border-destructive/30', text: 'text-destructive' },
+  HIGH: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400' },
+  MEDIUM: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400' },
+  LOW: { bg: 'bg-muted/30', border: 'border-border/30', text: 'text-muted-foreground' },
+};
+
 interface AnalysisResult { content: string; annotations?: Annotation[]; }
 
 export default function ImportDesignPage() {
@@ -82,6 +91,11 @@ export default function ImportDesignPage() {
   const [stlData, setStlData] = useState<STLData | null>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
+
+  // Geometry zones state
+  const [showZones, setShowZones] = useState(true);
+  const [selectedZone, setSelectedZone] = useState<string | null>(null);
+  const [zonesExpanded, setZonesExpanded] = useState(true);
 
   // Heat stress state
   const [heatMode, setHeatMode] = useState(false);
@@ -122,6 +136,8 @@ export default function ImportDesignPage() {
     }
     setModelLoading(true);
     setStlData(null);
+    setShowZones(true);
+    setSelectedZone(null);
     if (modelUrl) URL.revokeObjectURL(modelUrl);
     const url = URL.createObjectURL(file);
     setModelUrl(url);
@@ -149,10 +165,7 @@ export default function ImportDesignPage() {
 
   // ─── Heat Stress Logic ───
   const handleHeatStressToggle = () => {
-    if (heatMode) {
-      setHeatMode(false);
-      return;
-    }
+    if (heatMode) { setHeatMode(false); return; }
     setHeatModalOpen(true);
   };
 
@@ -163,37 +176,25 @@ export default function ImportDesignPage() {
       setHeatModalOpen(false);
       return;
     }
-
-    // Get last row values for each temp column and auto-map
     const lastRow = rows[rows.length - 1] || {};
     const bbox = stlData?.boundingBox;
     const w = bbox?.width || 100;
-    const h = bbox?.height || 100;
-    const d = bbox?.depth || 100;
 
     const sensors: HeatSensor[] = tempCols.map((col, i) => {
       const temp = parseFloat(String(lastRow[col])) || 25;
       const frac = tempCols.length > 1 ? i / (tempCols.length - 1) : 0.5;
-      return {
-        name: col,
-        temperature: temp,
-        position: new THREE.Vector3((frac - 0.5) * w * 0.8, 0, 0),
-        mapped: true,
-      };
+      return { name: col, temperature: temp, position: new THREE.Vector3((frac - 0.5) * w * 0.8, 0, 0), mapped: true };
     });
 
     setHeatSensors(sensors);
     setHeatMode(true);
     setHeatModalOpen(false);
-    // Trigger heat AI analysis
     runHeatAnalysis(sensors);
   };
 
   const handleHeatUploadCSV = (file: File) => {
     Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: true,
+      header: true, skipEmptyLines: true, dynamicTyping: true,
       complete: (results) => {
         const columns = results.meta.fields || [];
         processHeatTelemetry(results.data as Record<string, any>[], columns);
@@ -215,48 +216,37 @@ export default function ImportDesignPage() {
       const sensorSummary = sensors.map(s => `${s.name}: ${s.temperature.toFixed(1)}°C`).join('\n');
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
         body: JSON.stringify({
-          messages: [{
-            role: 'user',
-            content: `Analyze this heat stress data mapped onto a 3D engineering component:\n\nTEMPERATURE READINGS:\n${sensorSummary}\n\nCOMPONENT: ${uploadedFileName || 'Unknown'}\nDIMENSIONS: ${stlData ? `${stlData.boundingBox.width.toFixed(1)}mm × ${stlData.boundingBox.height.toFixed(1)}mm × ${stlData.boundingBox.depth.toFixed(1)}mm` : 'Unknown'}\n\nProvide:\n1. THERMAL OVERVIEW - Overall thermal condition\n2. CRITICAL ZONES - Temperature reading, risk level, why dangerous\n3. THERMAL PATTERNS - Hot spots, cold zones, gradient analysis\n4. ROOT CAUSE ANALYSIS - Why zones are hot\n5. COOLING RECOMMENDATIONS - Priority ordered solutions\n6. MATERIAL ASSESSMENT - Suitability for these temperatures\n7. THERMAL SCORE - Overall thermal health X/10`,
-          }],
-          projectContext: null,
-          telemetryStats: null,
+          messages: [{ role: 'user', content: `Analyze this heat stress data mapped onto a 3D engineering component:\n\nTEMPERATURE READINGS:\n${sensorSummary}\n\nCOMPONENT: ${uploadedFileName || 'Unknown'}\nDIMENSIONS: ${stlData ? `${stlData.boundingBox.width.toFixed(1)}mm × ${stlData.boundingBox.height.toFixed(1)}mm × ${stlData.boundingBox.depth.toFixed(1)}mm` : 'Unknown'}\n\nProvide:\n1. THERMAL OVERVIEW\n2. CRITICAL ZONES\n3. THERMAL PATTERNS\n4. ROOT CAUSE ANALYSIS\n5. COOLING RECOMMENDATIONS\n6. MATERIAL ASSESSMENT\n7. THERMAL SCORE X/10` }],
+          projectContext: null, telemetryStats: null,
         }),
       });
       if (!resp.ok) throw new Error('Heat analysis failed');
       const reader = resp.body!.getReader();
       const decoder = new TextDecoder();
-      let fullText = '';
-      let textBuffer = '';
+      let fullText = '', textBuffer = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         textBuffer += decoder.decode(value, { stream: true });
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
+        let ni: number;
+        while ((ni = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, ni);
+          textBuffer = textBuffer.slice(ni + 1);
           if (line.endsWith('\r')) line = line.slice(0, -1);
           if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') break;
+          const js = line.slice(6).trim();
+          if (js === '[DONE]') break;
           try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) { fullText += content; setHeatAnalysis(fullText); }
+            const p = JSON.parse(js);
+            const c = p.choices?.[0]?.delta?.content;
+            if (c) { fullText += c; setHeatAnalysis(fullText); }
           } catch { textBuffer = line + '\n' + textBuffer; break; }
         }
       }
-    } catch {
-      toast({ title: 'Heat analysis failed', variant: 'destructive' });
-    } finally {
-      setHeatAnalyzing(false);
-    }
+    } catch { toast({ title: 'Heat analysis failed', variant: 'destructive' }); }
+    finally { setHeatAnalyzing(false); }
   };
 
   // ─── Main Analysis ───
@@ -281,7 +271,6 @@ export default function ImportDesignPage() {
         fileContent = await uploadedFile.text();
       }
 
-      // Build the enhanced prompt with STL data if available
       let userContent = '';
       if (stlData) {
         userContent = `Analyze this engineering component based on REAL extracted geometric data:
@@ -299,6 +288,9 @@ COMPONENT DATA:
 - Estimated wall thickness: ${stlData.estimatedWallThickness.toFixed(2)}mm
 - Has holes/bores: ${stlData.hasHoles}
 - Symmetrical: ${stlData.symmetrical}
+
+GEOMETRY ANALYSIS ZONES DETECTED:
+${stlData.geometryZones.map(z => `- ${z.label} (${z.severity}): ${z.explanation}`).join('\n')}
 
 CAD SOFTWARE: ${software || 'Not specified'}
 `;
@@ -323,10 +315,7 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
 
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
         body: JSON.stringify({
           messages: [{ role: 'user', content: userContent }],
           projectContext: project ? {
@@ -345,25 +334,24 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
 
       const reader = resp.body!.getReader();
       const decoder = new TextDecoder();
-      let fullText = '';
-      let textBuffer = '';
+      let fullText = '', textBuffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         textBuffer += decoder.decode(value, { stream: true });
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
+        let ni: number;
+        while ((ni = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, ni);
+          textBuffer = textBuffer.slice(ni + 1);
           if (line.endsWith('\r')) line = line.slice(0, -1);
           if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') break;
+          const js = line.slice(6).trim();
+          if (js === '[DONE]') break;
           try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) { fullText += content; setResult({ content: fullText }); }
+            const p = JSON.parse(js);
+            const c = p.choices?.[0]?.delta?.content;
+            if (c) { fullText += c; setResult({ content: fullText }); }
           } catch { textBuffer = line + '\n' + textBuffer; break; }
         }
       }
@@ -384,9 +372,9 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
   };
 
   const guide = software ? exportGuidelines[software] : null;
-
-  // Clean result content (remove annotations block for display)
   const displayContent = result?.content?.replace(/```annotations-json[\s\S]*?```/g, '').trim();
+  const geometryZones = stlData?.geometryZones || [];
+  const sortedZones = [...geometryZones].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -423,6 +411,10 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
               heatSensors={heatSensors}
               heatMode={heatMode}
               heatOpacity={heatOpacity / 100}
+              geometryZones={geometryZones}
+              showZones={showZones && !heatMode}
+              selectedZone={selectedZone}
+              onSelectZone={setSelectedZone}
             />
             {dragOver && (
               <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center z-20">
@@ -439,11 +431,7 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
               <span className="truncate">{uploadedFile ? uploadedFile.name : 'Upload 3D Model (STL, OBJ, GLTF, GLB)'}</span>
             </Button>
             {modelUrl && modelType === 'stl' && (
-              <Button
-                variant={heatMode ? 'default' : 'secondary'}
-                className="gap-1.5"
-                onClick={handleHeatStressToggle}
-              >
+              <Button variant={heatMode ? 'default' : 'secondary'} className="gap-1.5" onClick={handleHeatStressToggle}>
                 <Thermometer className="w-4 h-4" />
                 <span className="hidden sm:inline">Heat</span>
               </Button>
@@ -486,15 +474,78 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                  <Crosshair className="w-3 h-3" /> Stress Zones
+                  <Search className="w-3 h-3" /> Zones Found
                 </div>
-                <p className="text-xs font-bold text-foreground">{stlData.highDensityZones} found</p>
+                <p className="text-xs font-bold text-primary">{geometryZones.length}</p>
               </div>
             </div>
           )}
 
+          {/* ─── Geometry Zones Report ─── */}
+          {sortedZones.length > 0 && (
+            <Card className="glass-strong border-glow">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Search className="w-4 h-4 text-primary" />
+                    <span className="uppercase tracking-wider text-muted-foreground">Geometry Inspection</span>
+                    <span className="text-xs font-normal text-muted-foreground">({sortedZones.length} zones)</span>
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground">Show on 3D</span>
+                      <Switch checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setZonesExpanded(!zonesExpanded)}>
+                      {zonesExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              {zonesExpanded && (
+                <CardContent className="space-y-2 pt-0">
+                  {sortedZones.map((zone) => {
+                    const style = SEVERITY_STYLES[zone.severity] || SEVERITY_STYLES.LOW;
+                    const typeLabel = ZONE_CONFIG[zone.type]?.label || zone.type;
+                    const isActive = selectedZone === zone.id;
+                    return (
+                      <div
+                        key={zone.id}
+                        onClick={() => { setSelectedZone(isActive ? null : zone.id); setShowZones(true); }}
+                        className={`rounded-lg border p-3 cursor-pointer transition-all hover:ring-1 hover:ring-primary/30 ${style.bg} ${style.border} ${isActive ? 'ring-2 ring-primary' : ''}`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: zone.color }} />
+                            <span className="text-xs font-bold text-foreground">{zone.label}</span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
+                            {zone.severity}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-background/50 border border-border/30 text-muted-foreground">
+                            {typeLabel}
+                          </span>
+                          {zone.affectedTriangles > 0 && (
+                            <span className="text-[10px] text-muted-foreground">{zone.affectedTriangles} faces</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-foreground/70 mb-1.5">{zone.explanation}</p>
+                        <div className="flex items-start gap-1.5 bg-background/30 rounded px-2 py-1.5 border border-border/20">
+                          <Lightbulb className="w-3 h-3 text-primary shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-foreground/80">{zone.suggestion}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
           <p className="text-[10px] text-muted-foreground/50 text-center">
-            3D visualization is for reference only. Critical zone highlighting is based on AI analysis of provided data.
+            3D visualization is for reference only. Critical zone highlighting is based on geometry analysis of provided data.
           </p>
 
           {/* Heat Analysis Results */}
@@ -629,9 +680,7 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
             <DialogTitle className="flex items-center gap-2">
               <Thermometer className="w-5 h-5 text-destructive" /> Heat Stress Visualization
             </DialogTitle>
-            <DialogDescription>
-              Map your real sensor temperature data directly onto your 3D model.
-            </DialogDescription>
+            <DialogDescription>Map your real sensor temperature data directly onto your 3D model.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 pt-2">
             <div>
@@ -655,10 +704,7 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-warning" /> No Temperature Data
             </DialogTitle>
-            <DialogDescription>
-              Heat Stress visualization requires temperature sensor data in your telemetry.
-              No temperature column was detected in your data.
-            </DialogDescription>
+            <DialogDescription>Heat Stress visualization requires temperature sensor data in your telemetry. No temperature column was detected.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 pt-2">
             <p className="text-xs text-muted-foreground">Please include sensors like: temperature_c, temp, T_motor, thermal_reading, heat_sensor</p>
