@@ -8,7 +8,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/upload', icon: Upload, label: 'Upload' },
   { to: '/import-design', icon: FileInput, label: 'Design' },
-  { to: '/assembly', icon: Box, label: 'Assembly' },
+  { to: '/assembly', icon: Search, label: 'Inspector' },
   { to: '/sensors', icon: Radio, label: 'Sensors' },
   { to: '/analysis', icon: BarChart3, label: 'Analysis' },
   { to: '/fea', icon: Microscope, label: 'FEA' },
