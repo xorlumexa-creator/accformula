@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useEffect, Suspense } from 'react';
-import { Canvas, useThree, useFrame, useLoader } from '@react-three/fiber';
-import { OrbitControls, Center, Html, Billboard, Grid } from '@react-three/drei';
+import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { Canvas, useThree, useFrame, useLoader, ThreeEvent } from '@react-three/fiber';
+import { OrbitControls, Html, Grid, TransformControls } from '@react-three/drei';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -9,25 +9,27 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import ReactMarkdown from 'react-markdown';
 import {
   Upload, Trash2, Eye, EyeOff, Maximize, RotateCcw, Box, Grid3x3,
   Loader2, Zap, Save, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   RotateCw, ChevronUp, ChevronDown, Crosshair, Star, Download,
-  Link2, Scale, Shield, Wrench, AlertTriangle,
+  Link2, Scale, Shield, Wrench, AlertTriangle, Move, Minimize2,
 } from 'lucide-react';
 
-const PYTHON_API = 'https://1d1141ef-3925-4e14-84d3-439cca800d44-00-38kio9wyr2lpc.sisko.replit.dev:8000/analyze-part';
+const PYTHON_API = 'https://python-1--epicure742.replit.app/analyze-part';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-const PART_COLORS = ['#ff4444', '#4488ff', '#44ff88', '#ffaa00', '#aa44ff', '#ff44aa'];
+const PART_COLORS = ['#ff4444', '#4488ff', '#44ff88', '#ffaa00', '#aa44ff', '#ff44aa', '#ff8844', '#44ffff'];
 const VIEWER_FORMATS = ['stl', 'obj', 'gltf', 'glb'];
 
 interface PartGeometry {
   dimensions_mm: { x: number; y: number; z: number };
   volume_mm3: number;
+  surface_area_mm2?: number;
   center_of_gravity: { x: number; y: number; z: number };
   is_watertight: boolean;
   vertex_count: number;
@@ -42,8 +44,9 @@ interface AssemblyPart {
   name: string;
   color: string;
   visible: boolean;
-  position: { x: number; y: number; z: number };
-  rotation: { x: number; y: number; z: number };
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
   geometry?: PartGeometry;
   geometrySource: 'python' | 'estimated';
   estimatedDims?: { x: number; y: number; z: number };
@@ -73,6 +76,7 @@ interface AnalysisResult {
 }
 
 type ViewMode = 'solid' | 'wireframe' | 'xray';
+type TransformMode = 'translate' | 'rotate' | 'scale';
 
 const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
@@ -92,6 +96,83 @@ async function fetchPythonGeometry(file: File): Promise<PartGeometry | null> {
   }
 }
 
+/* ─── Mesh island separation ─── */
+function separateMeshIslands(geometry: THREE.BufferGeometry): THREE.BufferGeometry[] {
+  const pos = geometry.attributes.position;
+  const index = geometry.index;
+  if (!pos) return [geometry];
+
+  const vertexCount = pos.count;
+  const parent = new Int32Array(vertexCount);
+  for (let i = 0; i < vertexCount; i++) parent[i] = i;
+
+  function find(a: number): number {
+    while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; }
+    return a;
+  }
+  function union(a: number, b: number) {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  if (index) {
+    const arr = index.array;
+    for (let i = 0; i < arr.length; i += 3) {
+      union(arr[i], arr[i + 1]);
+      union(arr[i + 1], arr[i + 2]);
+    }
+  } else {
+    for (let i = 0; i < vertexCount; i += 3) {
+      union(i, i + 1);
+      union(i + 1, i + 2);
+    }
+  }
+
+  const islands = new Map<number, number[]>();
+  if (index) {
+    const arr = index.array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const root = find(arr[i]);
+      if (!islands.has(root)) islands.set(root, []);
+      islands.get(root)!.push(i / 3);
+    }
+  } else {
+    for (let i = 0; i < vertexCount; i += 3) {
+      const root = find(i);
+      if (!islands.has(root)) islands.set(root, []);
+      islands.get(root)!.push(i / 3);
+    }
+  }
+
+  if (islands.size <= 1 || islands.size > 20) return [geometry];
+
+  const results: THREE.BufferGeometry[] = [];
+  for (const [, faceIndices] of islands) {
+    const newGeo = new THREE.BufferGeometry();
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const hasNormals = !!geometry.attributes.normal;
+
+    for (const fi of faceIndices) {
+      for (let v = 0; v < 3; v++) {
+        const vi = index ? index.array[fi * 3 + v] : fi * 3 + v;
+        positions.push(pos.getX(vi), pos.getY(vi), pos.getZ(vi));
+        if (hasNormals) {
+          const n = geometry.attributes.normal;
+          normals.push(n.getX(vi), n.getY(vi), n.getZ(vi));
+        }
+      }
+    }
+
+    newGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    if (normals.length) newGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    else newGeo.computeVertexNormals();
+    results.push(newGeo);
+  }
+
+  return results;
+}
+
 /* ─── Three.js estimated dimensions ─── */
 function estimateDimensions(geometry: THREE.BufferGeometry): { x: number; y: number; z: number } {
   geometry.computeBoundingBox();
@@ -103,59 +184,163 @@ function estimateDimensions(geometry: THREE.BufferGeometry): { x: number; y: num
   };
 }
 
-/* ─── 3D Part Model Components ─── */
-function PartSTL({ url, color, viewMode, isSelected, onBoundsReady }: {
-  url: string; color: string; viewMode: ViewMode; isSelected: boolean;
+/* ─── Materials ─── */
+function getPartMaterial(color: string, viewMode: ViewMode, isSelected: boolean, isHovered: boolean, isIsolatedOther: boolean): THREE.Material {
+  const c = new THREE.Color(color);
+  const opacity = isIsolatedOther ? 0 : 1;
+  switch (viewMode) {
+    case 'wireframe':
+      return new THREE.MeshStandardMaterial({ color: c, wireframe: true, roughness: 0.5, transparent: isIsolatedOther, opacity });
+    case 'xray':
+      return new THREE.MeshPhysicalMaterial({ color: c, transparent: true, opacity: isIsolatedOther ? 0 : 0.3, roughness: 0.2, metalness: 0.5, side: THREE.DoubleSide });
+    default:
+      return new THREE.MeshStandardMaterial({
+        color: c, roughness: 0.3, metalness: 0.7,
+        emissive: isSelected ? c : isHovered ? c : new THREE.Color(0x000000),
+        emissiveIntensity: isSelected ? 0.2 : isHovered ? 0.1 : 0,
+        transparent: isIsolatedOther, opacity,
+      });
+  }
+}
+
+/* ─── Part Mesh component (handles click/hover) ─── */
+function PartMesh({ geometry, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onClick }: {
+  geometry: THREE.BufferGeometry; color: string; viewMode: ViewMode;
+  isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
+  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+}) {
+  const mat = useMemo(() => getPartMaterial(color, viewMode, isSelected, isHovered, isIsolatedOther),
+    [color, viewMode, isSelected, isHovered, isIsolatedOther]);
+
+  return (
+    <mesh geometry={geometry} material={mat} castShadow receiveShadow
+      onPointerOver={(e) => { e.stopPropagation(); onPointerOver(); }}
+      onPointerOut={onPointerOut}
+      onClick={(e) => { e.stopPropagation(); onClick(e); }}
+    />
+  );
+}
+
+/* ─── STL Part ─── */
+function PartSTL({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onBoundsReady, onPointerOver, onPointerOut, onClick }: {
+  url: string; color: string; viewMode: ViewMode; isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
   onBoundsReady?: (dims: { x: number; y: number; z: number }) => void;
+  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
 }) {
   const geometry = useLoader(STLLoader, url);
-  const meshRef = useRef<THREE.Mesh>(null);
   const readyRef = useRef(false);
 
   useEffect(() => {
     if (readyRef.current || !onBoundsReady) return;
     geometry.computeVertexNormals();
-    const dims = estimateDimensions(geometry);
-    onBoundsReady(dims);
+    onBoundsReady(estimateDimensions(geometry));
     readyRef.current = true;
   }, [geometry, onBoundsReady]);
 
-  const mat = getPartMaterial(color, viewMode, isSelected);
-  return <mesh ref={meshRef} geometry={geometry} material={mat} castShadow receiveShadow />;
+  return <PartMesh geometry={geometry} color={color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={isIsolatedOther} onPointerOver={onPointerOver} onPointerOut={onPointerOut} onClick={onClick} />;
 }
 
-function PartOBJ({ url, color, viewMode, isSelected }: { url: string; color: string; viewMode: ViewMode; isSelected: boolean }) {
+function PartOBJ({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onClick }: {
+  url: string; color: string; viewMode: ViewMode; isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
+  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+}) {
   const obj = useLoader(OBJLoader, url);
-  const mat = getPartMaterial(color, viewMode, isSelected);
-  useEffect(() => {
-    obj.traverse((child: any) => { if (child.isMesh) { child.material = mat; child.castShadow = true; } });
-  }, [obj, mat]);
-  return <primitive object={obj} />;
+  const mat = useMemo(() => getPartMaterial(color, viewMode, isSelected, isHovered, isIsolatedOther),
+    [color, viewMode, isSelected, isHovered, isIsolatedOther]);
+  useEffect(() => { obj.traverse((c: any) => { if (c.isMesh) { c.material = mat; c.castShadow = true; } }); }, [obj, mat]);
+  return <primitive object={obj}
+    onPointerOver={(e: any) => { e.stopPropagation(); onPointerOver(); }}
+    onPointerOut={onPointerOut}
+    onClick={(e: any) => { e.stopPropagation(); onClick(e); }}
+  />;
 }
 
-function PartGLTF({ url, color, viewMode, isSelected }: { url: string; color: string; viewMode: ViewMode; isSelected: boolean }) {
+function PartGLTF({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onClick }: {
+  url: string; color: string; viewMode: ViewMode; isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
+  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+}) {
   const gltf = useLoader(GLTFLoader, url);
-  const mat = getPartMaterial(color, viewMode, isSelected);
-  useEffect(() => {
-    gltf.scene.traverse((child: any) => { if (child.isMesh && viewMode !== 'solid') { child.material = mat; } });
-  }, [gltf, viewMode, mat]);
-  return <primitive object={gltf.scene} />;
+  const mat = useMemo(() => getPartMaterial(color, viewMode, isSelected, isHovered, isIsolatedOther),
+    [color, viewMode, isSelected, isHovered, isIsolatedOther]);
+  useEffect(() => { gltf.scene.traverse((c: any) => { if (c.isMesh) { c.material = mat; } }); }, [gltf, viewMode, mat]);
+  return <primitive object={gltf.scene}
+    onPointerOver={(e: any) => { e.stopPropagation(); onPointerOver(); }}
+    onPointerOut={onPointerOut}
+    onClick={(e: any) => { e.stopPropagation(); onClick(e); }}
+  />;
 }
 
-function getPartMaterial(color: string, viewMode: ViewMode, isSelected: boolean): THREE.Material {
-  const c = new THREE.Color(color);
-  switch (viewMode) {
-    case 'wireframe':
-      return new THREE.MeshStandardMaterial({ color: c, wireframe: true, roughness: 0.5 });
-    case 'xray':
-      return new THREE.MeshPhysicalMaterial({ color: c, transparent: true, opacity: 0.3, roughness: 0.2, metalness: 0.5, side: THREE.DoubleSide });
-    default:
-      return new THREE.MeshStandardMaterial({
-        color: c, roughness: 0.35, metalness: 0.65,
-        emissive: isSelected ? c : new THREE.Color(0x000000),
-        emissiveIntensity: isSelected ? 0.15 : 0,
-      });
-  }
+/* ─── Annotation Spheres ─── */
+function AnnotationSpheres({ annotations, parts, visible }: {
+  annotations: AssemblyAnnotation[]; parts: AssemblyPart[]; visible: boolean;
+}) {
+  const bbox = useMemo(() => {
+    if (!visible || annotations.length === 0 || parts.length === 0) return null;
+    const box = new THREE.Box3();
+    parts.forEach(p => {
+      const dims = p.geometry?.dimensions_mm || p.estimatedDims || { x: 10, y: 10, z: 10 };
+      const halfX = dims.x / 2, halfY = dims.y / 2, halfZ = dims.z / 2;
+      const pos = p.position;
+      box.expandByPoint(new THREE.Vector3(pos[0] - halfX, pos[1] - halfY, pos[2] - halfZ));
+      box.expandByPoint(new THREE.Vector3(pos[0] + halfX, pos[1] + halfY, pos[2] + halfZ));
+    });
+    return box;
+  }, [parts, visible, annotations.length]);
+
+  if (!bbox) return null;
+
+
+  const maxDim = Math.max(bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z);
+  const sphereSize = maxDim * 0.03;
+  const center = bbox.getCenter(new THREE.Vector3());
+
+  const getPos = (hint: string): [number, number, number] => {
+    switch (hint) {
+      case 'far_end_top': return [bbox.min.x, bbox.max.y, bbox.max.z];
+      case 'far_end_bottom': return [bbox.min.x, bbox.min.y, bbox.max.z];
+      case 'middle_center': return [center.x, center.y, center.z];
+      case 'near_end_top': return [bbox.max.x, bbox.max.y, bbox.min.z];
+      case 'near_end_bottom': return [bbox.max.x, bbox.min.y, bbox.min.z];
+      case 'middle_top': return [center.x, bbox.max.y, center.z];
+      case 'middle_bottom': return [center.x, bbox.min.y, center.z];
+      default: return [center.x, center.y, center.z];
+    }
+  };
+
+  return (
+    <>
+      {annotations.map(a => {
+        const pos = getPos(a.position_hint);
+        return (
+          <mesh key={a.id} position={pos}>
+            <sphereGeometry args={[sphereSize, 16, 16]} />
+            <meshStandardMaterial color={a.color} emissive={a.color} emissiveIntensity={0.5} transparent opacity={0.85} />
+            <Html center distanceFactor={maxDim * 2} style={{ pointerEvents: 'none' }}>
+              <div className="bg-[#111111]/90 border border-[#333] rounded px-2 py-1 text-[10px] text-white whitespace-nowrap backdrop-blur-sm">
+                {a.title}
+              </div>
+            </Html>
+          </mesh>
+        );
+      })}
+    </>
+  );
+}
+
+/* ─── Bobbing animation for unselected parts ─── */
+function BobbingGroup({ children, isSelected, partId }: { children: React.ReactNode; isSelected: boolean; partId: string }) {
+  const ref = useRef<THREE.Group>(null);
+  const phase = useMemo(() => Math.random() * Math.PI * 2, [partId]);
+
+  useFrame(({ clock }) => {
+    if (ref.current && !isSelected) {
+      ref.current.position.y = Math.sin(clock.elapsedTime * 0.8 + phase) * 0.002;
+    } else if (ref.current) {
+      ref.current.position.y = 0;
+    }
+  });
+
+  return <group ref={ref}>{children}</group>;
 }
 
 /* ─── Auto fit camera ─── */
@@ -179,35 +364,127 @@ function AutoFit({ orbitRef }: { orbitRef: React.RefObject<any> }) {
   return null;
 }
 
-/* ─── Assembly Scene ─── */
-function AssemblyScene({ parts, viewMode, selectedId, orbitRef, onEstimatedDims }: {
-  parts: AssemblyPart[]; viewMode: ViewMode; selectedId: string | null;
+/* ─── TransformGizmo wrapper ─── */
+function PartWithTransform({ part, viewMode, selectedId, isolatedId, hoveredId, transformMode, snapEnabled, orbitRef,
+  onSelect, onHover, onUnhover, onTransformChange }: {
+  part: AssemblyPart; viewMode: ViewMode; selectedId: string | null; isolatedId: string | null;
+  hoveredId: string | null; transformMode: TransformMode; snapEnabled: boolean;
   orbitRef: React.RefObject<any>;
-  onEstimatedDims: (partId: string, dims: { x: number; y: number; z: number }) => void;
+  onSelect: (id: string) => void; onHover: (id: string) => void; onUnhover: () => void;
+  onTransformChange: (id: string, pos: [number, number, number], rot: [number, number, number], scale: [number, number, number]) => void;
+}) {
+  const transformRef = useRef<any>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const isSelected = selectedId === part.id;
+  const isHovered = hoveredId === part.id;
+  const isIsolatedOther = isolatedId !== null && isolatedId !== part.id;
+
+  useEffect(() => {
+    if (transformRef.current) {
+      const ctrl = transformRef.current;
+      const cb = () => {
+        if (groupRef.current) {
+          const p = groupRef.current.position;
+          const r = groupRef.current.rotation;
+          const s = groupRef.current.scale;
+          onTransformChange(part.id,
+            [p.x, p.y, p.z],
+            [THREE.MathUtils.radToDeg(r.x), THREE.MathUtils.radToDeg(r.y), THREE.MathUtils.radToDeg(r.z)],
+            [s.x, s.y, s.z]
+          );
+        }
+      };
+      ctrl.addEventListener('objectChange', cb);
+      // Disable orbit while transforming
+      const dragStart = () => { if (orbitRef.current) orbitRef.current.enabled = false; };
+      const dragEnd = () => { if (orbitRef.current) orbitRef.current.enabled = true; };
+      ctrl.addEventListener('mouseDown', dragStart);
+      ctrl.addEventListener('mouseUp', dragEnd);
+      return () => {
+        ctrl.removeEventListener('objectChange', cb);
+        ctrl.removeEventListener('mouseDown', dragStart);
+        ctrl.removeEventListener('mouseUp', dragEnd);
+      };
+    }
+  }, [isSelected, transformMode, part.id, onTransformChange, orbitRef]);
+
+  if (!part.visible && !isIsolatedOther) return null;
+  if (isIsolatedOther) return null;
+
+  const interactionProps = {
+    onPointerOver: () => onHover(part.id),
+    onPointerOut: onUnhover,
+    onClick: (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(part.id); },
+  };
+
+  const partComponent = (
+    <Suspense fallback={<Html center><Loader2 className="w-4 h-4 animate-spin text-red-500" /></Html>}>
+      {part.fileType === 'stl' && <PartSTL url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
+      {part.fileType === 'obj' && <PartOBJ url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
+      {(part.fileType === 'gltf' || part.fileType === 'glb') && <PartGLTF url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
+    </Suspense>
+  );
+
+  return (
+    <>
+      <group ref={groupRef}
+        position={part.position}
+        rotation={[part.rotation[0] * Math.PI / 180, part.rotation[1] * Math.PI / 180, part.rotation[2] * Math.PI / 180]}
+        scale={part.scale}
+      >
+        <BobbingGroup isSelected={isSelected} partId={part.id}>
+          {partComponent}
+        </BobbingGroup>
+      </group>
+      {isSelected && groupRef.current && (
+        <TransformControls
+          ref={transformRef}
+          object={groupRef.current}
+          mode={transformMode}
+          translationSnap={snapEnabled ? 5 : undefined}
+          rotationSnap={snapEnabled ? THREE.MathUtils.degToRad(15) : undefined}
+          size={0.8}
+        />
+      )}
+    </>
+  );
+}
+
+/* ─── Assembly Scene ─── */
+function AssemblyScene({ parts, viewMode, selectedId, isolatedId, hoveredId, transformMode, snapEnabled, orbitRef,
+  annotations, showAnnotations, onSelect, onHover, onUnhover, onTransformChange, onDeselect }: {
+  parts: AssemblyPart[]; viewMode: ViewMode; selectedId: string | null; isolatedId: string | null;
+  hoveredId: string | null; transformMode: TransformMode; snapEnabled: boolean;
+  orbitRef: React.RefObject<any>;
+  annotations: AssemblyAnnotation[]; showAnnotations: boolean;
+  onSelect: (id: string) => void; onHover: (id: string) => void; onUnhover: () => void;
+  onTransformChange: (id: string, pos: [number, number, number], rot: [number, number, number], scale: [number, number, number]) => void;
+  onDeselect: () => void;
 }) {
   return (
     <>
-      <ambientLight intensity={0.3} />
-      <directionalLight position={[5, 8, 3]} intensity={1.2} castShadow color="#ffffff" />
+      <ambientLight intensity={0.35} />
+      <directionalLight position={[5, 8, 3]} intensity={1.3} castShadow color="#ffffff" />
       <directionalLight position={[-6, 4, -2]} intensity={0.5} color="#f0f0ff" />
-      <directionalLight position={[0, 2, -8]} intensity={0.3} color="#8888ff" />
+      <pointLight position={[0, -3, 0]} intensity={0.15} color="#ff2200" />
+
+      {/* Click on background to deselect */}
+      <mesh position={[0, -100, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={onDeselect}>
+        <planeGeometry args={[10000, 10000]} />
+        <meshBasicMaterial visible={false} />
+      </mesh>
 
       {parts.filter(p => p.visible).map(part => (
-        <group key={part.id} position={[part.position.x, part.position.y, part.position.z]}
-          rotation={[part.rotation.x * Math.PI / 180, part.rotation.y * Math.PI / 180, part.rotation.z * Math.PI / 180]}>
-          <Suspense fallback={<Html center><Loader2 className="w-4 h-4 animate-spin text-primary" /></Html>}>
-            {part.fileType === 'stl' && (
-              <PartSTL url={part.url} color={part.color} viewMode={viewMode} isSelected={selectedId === part.id}
-                onBoundsReady={(dims) => onEstimatedDims(part.id, dims)} />
-            )}
-            {part.fileType === 'obj' && <PartOBJ url={part.url} color={part.color} viewMode={viewMode} isSelected={selectedId === part.id} />}
-            {(part.fileType === 'gltf' || part.fileType === 'glb') && <PartGLTF url={part.url} color={part.color} viewMode={viewMode} isSelected={selectedId === part.id} />}
-          </Suspense>
-        </group>
+        <PartWithTransform key={part.id} part={part} viewMode={viewMode} selectedId={selectedId}
+          isolatedId={isolatedId} hoveredId={hoveredId} transformMode={transformMode}
+          snapEnabled={snapEnabled} orbitRef={orbitRef}
+          onSelect={onSelect} onHover={onHover} onUnhover={onUnhover} onTransformChange={onTransformChange} />
       ))}
 
-      <Grid infiniteGrid cellSize={0.5} sectionSize={2} cellColor="#330000" sectionColor="#440000" fadeDistance={50} position={[0, -0.01, 0]} />
-      <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} minDistance={0.001} maxDistance={10000} zoomSpeed={3} rotateSpeed={0.8} panSpeed={1.5} />
+      <AnnotationSpheres annotations={annotations} parts={parts} visible={showAnnotations} />
+
+      <Grid infiniteGrid cellSize={0.5} sectionSize={2} cellColor="#1a0000" sectionColor="#330000" fadeDistance={50} position={[0, -0.01, 0]} />
+      <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.05} minDistance={0.001} maxDistance={10000} zoomSpeed={3} rotateSpeed={0.8} panSpeed={1.5} />
       <AutoFit orbitRef={orbitRef} />
     </>
   );
@@ -218,20 +495,19 @@ const LOADING_MSGS = [
   'Connecting to geometry engine...',
   'Extracting real dimensions...',
   'Calculating joint compatibility...',
-  'Analyzing stress distribution...',
+  'Analyzing stress zones...',
   'Computing screw specifications...',
   'Generating engineering report...',
   'Finalizing assessment...',
 ];
 
-/* ─── Community parts placeholder ─── */
 const COMMUNITY_PARTS = [
   { name: 'M8 Hex Bolt', rating: 4.5, downloads: 1240 },
   { name: 'Bearing Housing', rating: 4.8, downloads: 890 },
   { name: 'Motor Mount Bracket', rating: 4.2, downloads: 2100 },
   { name: 'Servo Horn 25T', rating: 4.6, downloads: 560 },
-  { name: 'T-Slot Bracket', rating: 4.3, downloads: 1780 },
-  { name: 'Wheel Hub Adapter', rating: 4.7, downloads: 930 },
+  { name: 'Carbon Rod End', rating: 4.3, downloads: 1780 },
+  { name: 'Quadcopter Arm 250mm', rating: 4.7, downloads: 930 },
 ];
 
 /* ─── Main Page ─── */
@@ -240,15 +516,34 @@ export default function AssemblyBuilderPage() {
   const { toast } = useToast();
   const [parts, setParts] = useState<AssemblyPart[]>([]);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
+  const [hoveredPart, setHoveredPart] = useState<string | null>(null);
+  const [isolatedPart, setIsolatedPart] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('solid');
+  const [transformMode, setTransformMode] = useState<TransformMode>('translate');
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [snapToGrid, setSnapToGrid] = useState(false);
   const [backendOffline, setBackendOffline] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const orbitRef = useRef<any>(null);
+  const lastClickRef = useRef<{ id: string; time: number } | null>(null);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 't' || e.key === 'T') setTransformMode('translate');
+      if (e.key === 'r' || e.key === 'R') setTransformMode('rotate');
+      if (e.key === 's' || e.key === 'S') setTransformMode('scale');
+      if (e.key === 'Escape') { setSelectedPart(null); setIsolatedPart(null); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Loading messages cycle
   useEffect(() => {
@@ -269,28 +564,31 @@ export default function AssemblyBuilderPage() {
   const handleUpload = useCallback(async (file: File) => {
     const ext = getFileExt(file.name);
     if (!VIEWER_FORMATS.includes(ext)) {
-      toast({ title: 'Unsupported format', description: 'Please upload STL, OBJ, GLTF or GLB.', variant: 'destructive' });
+      toast({ title: 'Please upload STL, OBJ, GLTF or GLB file', variant: 'destructive' });
       return;
     }
     if (file.size > 50 * 1024 * 1024) {
-      toast({ title: 'File exceeds 50MB limit', variant: 'destructive' });
+      toast({ title: 'File too large — maximum 50MB', variant: 'destructive' });
       return;
     }
 
     const id = crypto.randomUUID();
     const url = URL.createObjectURL(file);
-    const color = PART_COLORS[parts.length % PART_COLORS.length];
+    const colorIdx = parts.length;
 
     const newPart: AssemblyPart = {
-      id, file, url, fileType: ext, name: file.name, color, visible: true,
-      position: { x: parts.length * 2, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
+      id, file, url, fileType: ext, name: file.name,
+      color: PART_COLORS[colorIdx % PART_COLORS.length],
+      visible: true,
+      position: [parts.length * 3, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
       geometrySource: 'estimated',
     };
     setParts(prev => [...prev, newPart]);
     setSelectedPart(id);
 
-    // Fetch Python geometry in background
+    // Fetch Python geometry
     const geo = await fetchPythonGeometry(file);
     if (geo) {
       setParts(prev => prev.map(p => p.id === id ? { ...p, geometry: geo, geometrySource: 'python' as const } : p));
@@ -299,8 +597,24 @@ export default function AssemblyBuilderPage() {
     }
   }, [parts.length, toast]);
 
-  const handleEstimatedDims = useCallback((partId: string, dims: { x: number; y: number; z: number }) => {
-    setParts(prev => prev.map(p => p.id === partId ? { ...p, estimatedDims: dims } : p));
+  const handleSelect = useCallback((id: string) => {
+    const now = Date.now();
+    if (lastClickRef.current && lastClickRef.current.id === id && now - lastClickRef.current.time < 400) {
+      // Double click → isolate
+      setIsolatedPart(prev => prev === id ? null : id);
+      lastClickRef.current = null;
+      return;
+    }
+    lastClickRef.current = { id, time: now };
+    setSelectedPart(prev => prev === id ? null : id);
+  }, []);
+
+  const handleDeselect = useCallback(() => {
+    setSelectedPart(null);
+  }, []);
+
+  const handleTransformChange = useCallback((id: string, pos: [number, number, number], rot: [number, number, number], scale: [number, number, number]) => {
+    setParts(prev => prev.map(p => p.id === id ? { ...p, position: pos, rotation: rot, scale } : p));
   }, []);
 
   const removePart = (id: string) => {
@@ -310,37 +624,41 @@ export default function AssemblyBuilderPage() {
       return prev.filter(p => p.id !== id);
     });
     if (selectedPart === id) setSelectedPart(null);
+    if (isolatedPart === id) setIsolatedPart(null);
   };
 
   const toggleVisibility = (id: string) => {
     setParts(prev => prev.map(p => p.id === id ? { ...p, visible: !p.visible } : p));
   };
 
-  const movePart = (axis: 'x' | 'y' | 'z', delta: number) => {
+  const movePart = (axis: 0 | 1 | 2, delta: number) => {
     if (!selectedPart) return;
     const step = snapToGrid ? 5 : 1;
-    setParts(prev => prev.map(p =>
-      p.id === selectedPart ? { ...p, position: { ...p.position, [axis]: p.position[axis] + delta * step } } : p
-    ));
+    setParts(prev => prev.map(p => {
+      if (p.id !== selectedPart) return p;
+      const pos = [...p.position] as [number, number, number];
+      pos[axis] += delta * step;
+      return { ...p, position: pos };
+    }));
   };
 
-  const rotatePart = (axis: 'x' | 'y' | 'z', delta: number) => {
+  const rotatePart = (axis: 0 | 1 | 2, delta: number) => {
     if (!selectedPart) return;
-    setParts(prev => prev.map(p =>
-      p.id === selectedPart ? { ...p, rotation: { ...p.rotation, [axis]: p.rotation[axis] + delta } } : p
-    ));
+    setParts(prev => prev.map(p => {
+      if (p.id !== selectedPart) return p;
+      const rot = [...p.rotation] as [number, number, number];
+      rot[axis] += delta;
+      return { ...p, rotation: rot };
+    }));
   };
 
-  const getDims = (p: AssemblyPart) => {
-    if (p.geometry) return p.geometry.dimensions_mm;
-    if (p.estimatedDims) return p.estimatedDims;
-    return { x: 0, y: 0, z: 0 };
-  };
+  const getDims = (p: AssemblyPart) => p.geometry?.dimensions_mm || p.estimatedDims || { x: 0, y: 0, z: 0 };
 
   const clearScene = () => {
     parts.forEach(p => URL.revokeObjectURL(p.url));
     setParts([]);
     setSelectedPart(null);
+    setIsolatedPart(null);
     setResult(null);
   };
 
@@ -359,27 +677,25 @@ export default function AssemblyBuilderPage() {
         .order('created_at', { ascending: false }).limit(1);
       const project = projects?.[0];
 
-      // Build part data strings
       const partDataStr = parts.map(p => {
         const dims = getDims(p);
         const geo = p.geometry;
         return `Part: ${p.name}
-Real Dimensions: ${dims.x.toFixed(1)}mm x ${dims.y.toFixed(1)}mm x ${dims.z.toFixed(1)}mm ${p.geometrySource === 'python' ? '(from Python API)' : '(estimated)'}
+Real Dimensions: ${dims.x.toFixed(1)}mm x ${dims.y.toFixed(1)}mm x ${dims.z.toFixed(1)}mm
 ${geo ? `Real Volume: ${geo.volume_mm3.toFixed(1)}mm3
-Real Center of Gravity: X:${geo.center_of_gravity.x.toFixed(2)} Y:${geo.center_of_gravity.y.toFixed(2)} Z:${geo.center_of_gravity.z.toFixed(2)}mm
-Mesh Quality: ${geo.is_watertight ? 'Watertight' : 'Has open boundaries'}
+Real CoG: X:${geo.center_of_gravity.x.toFixed(2)} Y:${geo.center_of_gravity.y.toFixed(2)} Z:${geo.center_of_gravity.z.toFixed(2)}mm
+Watertight: ${geo.is_watertight}
 Vertices: ${geo.vertex_count} Faces: ${geo.face_count}` : `Estimated Volume: ${(dims.x * dims.y * dims.z).toFixed(1)}mm3`}
-Current Position in Scene: X:${p.position.x.toFixed(1)} Y:${p.position.y.toFixed(1)} Z:${p.position.z.toFixed(1)}`;
+Scene Position: X:${p.position[0].toFixed(1)} Y:${p.position[1].toFixed(1)} Z:${p.position[2].toFixed(1)}
+Scene Rotation: X:${p.rotation[0].toFixed(1)} Y:${p.rotation[1].toFixed(1)} Z:${p.rotation[2].toFixed(1)} degrees`;
       }).join('\n\n');
 
-      // Calculate distances
       const distances: string[] = [];
       for (let i = 0; i < parts.length; i++) {
         for (let j = i + 1; j < parts.length; j++) {
-          const a = parts[i].position;
-          const b = parts[j].position;
-          const dist = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
-          distances.push(`Distance between ${parts[i].name} and ${parts[j].name}: ${dist.toFixed(1)}mm`);
+          const a = parts[i].position, b = parts[j].position;
+          const dist = Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
+          distances.push(`Distance ${parts[i].name} ↔ ${parts[j].name}: ${dist.toFixed(1)}mm`);
         }
       }
 
@@ -388,36 +704,36 @@ Current Position in Scene: X:${p.position.x.toFixed(1)} Y:${p.position.y.toFixed
         return sum + v;
       }, 0);
 
-      const prompt = `You are Lumexa Engineering AI. The user is building: ${project?.purpose || project?.project_name || 'engineering project'}. Budget: ${project?.budget_range || 'Not specified'}.
+      const prompt = `You are Lumexa Engineering AI. User is building: ${project?.purpose || project?.project_name || 'engineering project'}. Budget: ${project?.budget_range || 'Not specified'}.
 
-REAL GEOMETRIC DATA FROM PYTHON ANALYSIS:
+REAL GEOMETRIC DATA FROM PYTHON TRIMESH BACKEND:
 
 ${partDataStr}
 
-ASSEMBLY GEOMETRY:
+ASSEMBLY CALCULATIONS:
 Total parts: ${parts.length}
 ${distances.join('\n')}
-Estimated combined mass assuming aluminum 6061: ${(totalVolume * 0.0027).toFixed(1)}g
+Combined mass aluminum: ${(totalVolume * 0.0027).toFixed(1)}g
 
-Provide complete engineering assembly analysis:
+Provide complete assembly engineering analysis:
 
-1. Overview — what this assembly appears to be and overall assessment
-2. Joint Analysis — analyze each connection point between parts using real dimensions
-3. Screw Specifications — provide exact table with columns: Joint Location, Bolt Size, Length mm, Thread Pitch, Torque Nm, Quantity. Base sizes on real hole dimensions if available.
-4. Modifications Required — list specific changes needed with exact measurements in mm
+1. Overview — identify assembly type and overall assessment
+2. Joint Analysis — analyze each connection using real dimensions
+3. Screw Specifications — exact table with Joint Location, Bolt Size, Length mm, Thread Pitch, Torque Nm, Quantity based on real geometry
+4. Modifications Required — specific changes with exact measurements in mm
 5. Optimization Recommendations — engineering improvements
-6. Next Steps — what engineer should do next
+6. Next Steps — actionable items
 
-Then output a JSON annotations array:
+Output JSON annotations array:
 \`\`\`annotations-json
 {
   "annotations": [
-    {"id": 1, "severity": "CRITICAL", "zone": "zone_name", "position_hint": "far_end_top", "title": "Issue Title", "problem": "Detailed problem with measurements", "solution": "Specific solution with exact mm", "color": "#ff0000"}
+    {"id": 1, "severity": "CRITICAL", "zone": "zone_name", "position_hint": "far_end_top", "title": "Issue Title", "problem": "Detailed problem with real measurements from Python data", "solution": "Specific solution with exact mm values", "color": "#ff0000"}
   ]
 }
 \`\`\`
 
-Use the REAL geometric data for accurate analysis. Reference actual part dimensions and positions. Give specific measurements not generic advice.`;
+Reference actual part names and real dimensions throughout. Give specific measurements not generic advice.`;
 
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
@@ -431,7 +747,7 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
 
       if (!resp.ok) {
         if (resp.status === 429) throw new Error('Rate limit exceeded. Please try again shortly.');
-        if (resp.status === 402) throw new Error('AI credits exhausted. Please add credits.');
+        if (resp.status === 402) throw new Error('AI credits exhausted.');
         throw new Error('Analysis failed.');
       }
 
@@ -459,7 +775,6 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
         }
       }
 
-      // Parse annotations
       let annotations: AssemblyAnnotation[] = [];
       try {
         const match = fullText.match(/```annotations-json\s*([\s\S]*?)```/);
@@ -469,7 +784,6 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
         }
       } catch {}
 
-      // Calculate score
       let score = 100;
       annotations.forEach(a => {
         if (a.severity === 'CRITICAL') score -= 25;
@@ -493,7 +807,7 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
         },
       });
     } catch (err: any) {
-      toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
+      toast({ title: err.message || 'Analysis failed — please try again', variant: 'destructive' });
     } finally {
       setAnalyzing(false);
       setLoadingProgress(100);
@@ -501,11 +815,6 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
   };
 
   const selectedPartData = parts.find(p => p.id === selectedPart);
-  const viewButtons: { mode: ViewMode; icon: typeof Box; label: string }[] = [
-    { mode: 'solid', icon: Box, label: 'Solid' },
-    { mode: 'wireframe', icon: Grid3x3, label: 'Wire' },
-    { mode: 'xray', icon: Eye, label: 'X-Ray' },
-  ];
 
   const getScoreStyle = (s: number) => {
     if (s >= 90) return { bg: 'bg-[#001a00]', badge: 'GOOD', badgeColor: 'bg-green-600' };
@@ -514,10 +823,22 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
     return { bg: 'bg-[#1a0000]', badge: 'CRITICAL', badgeColor: 'bg-destructive' };
   };
 
+  const viewButtons: { mode: ViewMode; icon: typeof Box; label: string }[] = [
+    { mode: 'solid', icon: Box, label: 'Solid' },
+    { mode: 'wireframe', icon: Grid3x3, label: 'Wire' },
+    { mode: 'xray', icon: Eye, label: 'X-Ray' },
+  ];
+
+  const transformButtons: { mode: TransformMode; label: string; key: string }[] = [
+    { mode: 'translate', label: 'T', key: 'T' },
+    { mode: 'rotate', label: 'R', key: 'R' },
+    { mode: 'scale', label: 'S', key: 'S' },
+  ];
+
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col">
       {/* Top Bar */}
-      <div className="h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 shrink-0">
+      <div className="h-12 border-b border-[#222] bg-[#111111] flex items-center px-4 gap-3 shrink-0">
         <div className="flex items-center gap-2">
           <Box className="w-4 h-4 text-primary" />
           <span className="text-sm font-bold text-foreground">Assembly Builder</span>
@@ -543,98 +864,122 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
       {/* Three Panel Layout */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* LEFT SIDEBAR — Parts Library */}
-        <div className="w-full lg:w-1/4 border-r border-[#222222] bg-[#111111] border-t-2 border-t-primary overflow-y-auto shrink-0 lg:max-h-full max-h-[200px] lg:order-1 order-1">
-          <div className="p-3 space-y-3">
-            <div className="flex items-center gap-2">
-              <Box className="w-4 h-4 text-primary" />
-              <span className="text-sm font-bold text-foreground">Parts Library</span>
-            </div>
+        {!isFullscreen && (
+          <div className="w-full lg:w-[22%] border-r border-[#222] bg-[#111111] border-t-2 border-t-primary overflow-y-auto shrink-0 lg:max-h-full max-h-[180px]">
+            <div className="p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Box className="w-4 h-4 text-primary" />
+                <span className="text-sm font-bold text-foreground">Parts Library</span>
+              </div>
 
-            <input ref={fileRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
-            <Button className="w-full gap-2" onClick={() => fileRef.current?.click()}>
-              <Upload className="w-4 h-4" /> Upload Part STL
-            </Button>
+              <input ref={fileRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }} />
+              <Button className="w-full gap-2" onClick={() => fileRef.current?.click()}>
+                <Upload className="w-4 h-4" /> Upload Part STL
+              </Button>
 
-            {/* Uploaded parts */}
-            <div className="space-y-2">
-              {parts.map(part => {
-                const dims = getDims(part);
-                const isActive = selectedPart === part.id;
-                return (
-                  <div key={part.id}
-                    onClick={() => setSelectedPart(isActive ? null : part.id)}
-                    className={`bg-[#0a0a0a] rounded-lg p-2.5 border-l-4 cursor-pointer transition-all ${isActive ? 'ring-1 ring-primary' : 'hover:bg-[#151515]'}`}
-                    style={{ borderLeftColor: part.color }}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: part.color }} />
-                      <span className="text-xs font-medium text-foreground truncate flex-1">{part.name}</span>
-                      <button onClick={e => { e.stopPropagation(); toggleVisibility(part.id); }} className="text-muted-foreground hover:text-foreground">
-                        {part.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      </button>
-                      <button onClick={e => { e.stopPropagation(); removePart(part.id); }} className="text-muted-foreground hover:text-destructive">
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-primary font-mono">
-                      {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
-                    </p>
-                    {part.geometrySource === 'estimated' && part.geometry === undefined && (
-                      <p className="text-[9px] text-muted-foreground mt-0.5">
-                        {backendOffline ? '⚠ Estimated' : '⏳ Extracting...'}
-                      </p>
-                    )}
-                    <div className="flex gap-1 mt-1.5">
-                      <button
-                        onClick={e => { e.stopPropagation(); setSelectedPart(part.id); if (orbitRef.current) { orbitRef.current.target.set(part.position.x, part.position.y, part.position.z); orbitRef.current.update(); } }}
-                        className="text-[9px] text-muted-foreground hover:text-primary flex items-center gap-0.5"
-                      >
-                        <Crosshair className="w-2.5 h-2.5" /> Focus
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Community Parts */}
-            {parts.length >= 0 && (
-              <>
-                <div className="border-t border-[#222222] pt-2">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Community Parts</span>
-                </div>
-                <div className="space-y-1.5">
-                  {COMMUNITY_PARTS.map((cp, i) => (
-                    <div key={i} className="bg-[#0a0a0a] rounded p-2 flex items-center gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-foreground truncate">{cp.name}</p>
-                        <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
-                          <span className="flex items-center gap-0.5"><Star className="w-2.5 h-2.5 text-yellow-500" />{cp.rating}</span>
-                          <span className="flex items-center gap-0.5"><Download className="w-2.5 h-2.5" />{cp.downloads}</span>
-                        </div>
+              {/* Uploaded parts */}
+              <div className="space-y-2">
+                {parts.map(part => {
+                  const dims = getDims(part);
+                  const isActive = selectedPart === part.id;
+                  const mass = part.geometry ? (part.geometry.volume_mm3 * 0.0027).toFixed(1) : null;
+                  return (
+                    <div key={part.id}
+                      onClick={() => handleSelect(part.id)}
+                      className={`bg-[#0a0a0a] rounded-lg p-2.5 border-l-4 cursor-pointer transition-all ${isActive ? 'ring-1 ring-primary' : 'hover:bg-[#151515]'}`}
+                      style={{ borderLeftColor: part.color }}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: part.color }} />
+                        <span className="text-xs font-medium text-foreground truncate flex-1">{part.name}</span>
+                        <button onClick={e => { e.stopPropagation(); toggleVisibility(part.id); }} className="text-muted-foreground hover:text-foreground">
+                          {part.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); removePart(part.id); }} className="text-muted-foreground hover:text-destructive">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
-                      <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 border-primary/30 text-primary hover:bg-primary/10"
-                        onClick={() => toast({ title: 'Community library coming soon' })}>
-                        Add
-                      </Button>
+                      <p className="text-[10px] text-primary font-mono">
+                        {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="outline" className={`text-[8px] h-4 px-1 ${part.geometrySource === 'python' ? 'border-green-600/40 text-green-400' : 'border-muted-foreground/30 text-muted-foreground'}`}>
+                          {part.geometrySource === 'python' ? '✓ Verified' : part.geometry === undefined ? '⏳ Extracting...' : '⚠ Estimated'}
+                        </Badge>
+                        {mass && <span className="text-[9px] text-muted-foreground">{mass}g (Al)</span>}
+                      </div>
+                      <div className="flex gap-1 mt-1.5">
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            setSelectedPart(part.id);
+                            if (orbitRef.current) {
+                              orbitRef.current.target.set(...part.position);
+                              orbitRef.current.update();
+                            }
+                          }}
+                          className="text-[9px] text-muted-foreground hover:text-primary flex items-center gap-0.5"
+                        >
+                          <Crosshair className="w-2.5 h-2.5" /> Focus
+                        </button>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
+                  );
+                })}
+              </div>
+
+              {/* Community Parts */}
+              <div className="border-t border-[#222] pt-2">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Community Parts</span>
+              </div>
+              <div className="space-y-1.5">
+                {COMMUNITY_PARTS.map((cp, i) => (
+                  <div key={i} className="bg-[#0a0a0a] rounded p-2 flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-foreground truncate">{cp.name}</p>
+                      <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
+                        <span className="flex items-center gap-0.5"><Star className="w-2.5 h-2.5 text-yellow-500" />{cp.rating}</span>
+                        <span className="flex items-center gap-0.5"><Download className="w-2.5 h-2.5" />{cp.downloads}</span>
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 border-primary/30 text-primary hover:bg-primary/10"
+                      onClick={() => toast({ title: 'Community library coming soon' })}>
+                      Add
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* CENTER — 3D Viewport */}
-        <div className="flex-1 relative bg-[#0a0a0a] lg:order-2 order-2 min-h-[50vh] lg:min-h-0">
+        <div className={`relative bg-[#0a0a0a] min-h-[50vh] lg:min-h-0 ${isFullscreen ? 'flex-1' : 'flex-1 lg:w-[50%]'}`}>
           {backendOffline && (
-            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 text-[11px] text-muted-foreground bg-[#111111]/80 backdrop-blur-sm rounded px-3 py-1 border border-[#222222]">
+            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 text-[11px] text-muted-foreground bg-[#111]/80 backdrop-blur-sm rounded px-3 py-1 border border-[#222]">
               Geometry API offline — using estimates
             </div>
           )}
 
-          {/* Viewport toolbar top-left */}
+          {/* Transform mode buttons top-left */}
           <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5">
+            {transformButtons.map(({ mode, label, key }) => (
+              <Tooltip key={mode}>
+                <TooltipTrigger asChild>
+                  <Button size="sm"
+                    variant={transformMode === mode ? 'default' : 'secondary'}
+                    className="h-7 w-7 p-0 text-xs font-bold"
+                    onClick={() => setTransformMode(mode)}>
+                    {label}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">{mode.charAt(0).toUpperCase() + mode.slice(1)} ({key})</p>
+                </TooltipContent>
+              </Tooltip>
+            ))}
+            <div className="w-px h-5 bg-[#333] mx-1" />
             {viewButtons.map(({ mode, icon: Icon, label }) => (
               <Button key={mode} size="sm" variant={viewMode === mode ? 'default' : 'secondary'} className="h-7 px-2 text-xs gap-1" onClick={() => setViewMode(mode)}>
                 <Icon className="w-3.5 h-3.5" />
@@ -643,12 +988,20 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
             ))}
           </div>
 
-          {/* Viewport toolbar top-right */}
+          {/* Top-right controls */}
           <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
-            <Button size="sm" variant="secondary" className="h-7 w-7 p-0" title="Fullscreen">
-              <Maximize className="w-3.5 h-3.5" />
+            {result && result.annotations.length > 0 && (
+              <Button size="sm" variant={showAnnotations ? 'default' : 'secondary'} className="h-7 px-2 text-xs gap-1" onClick={() => setShowAnnotations(!showAnnotations)}>
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Issues</span>
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" className="h-7 w-7 p-0" onClick={() => setIsFullscreen(!isFullscreen)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
             </Button>
-            <Button size="sm" variant="secondary" className="h-7 w-7 p-0" onClick={() => orbitRef.current?.reset()} title="Reset camera">
+            <Button size="sm" variant="secondary" className="h-7 w-7 p-0" onClick={() => {
+              if (orbitRef.current) { orbitRef.current.reset(); }
+            }} title="Reset camera">
               <RotateCcw className="w-3.5 h-3.5" />
             </Button>
           </div>
@@ -658,37 +1011,61 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
             Parts in scene: {parts.filter(p => p.visible).length}
           </div>
 
-          {/* Transform Controls bottom-center */}
+          {/* Transform panel bottom-center */}
           {selectedPartData && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-[#111111]/90 backdrop-blur-md border border-[#222222] rounded-lg p-3 space-y-2">
-              <p className="text-[10px] text-primary font-bold text-center truncate max-w-[200px]">{selectedPartData.name}</p>
-              <div className="flex items-center gap-1">
-                <span className="text-[9px] text-muted-foreground w-6">Pos</span>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart('x', -1)}><ArrowLeft className="w-3 h-3" /></Button>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart('x', 1)}><ArrowRight className="w-3 h-3" /></Button>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart('y', 1)}><ArrowUp className="w-3 h-3" /></Button>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart('y', -1)}><ArrowDown className="w-3 h-3" /></Button>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart('z', 1)}><ChevronUp className="w-3 h-3" /></Button>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart('z', -1)}><ChevronDown className="w-3 h-3" /></Button>
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-[#111]/90 backdrop-blur-md border border-[#222] rounded-lg p-3 space-y-2 min-w-[240px]">
+              <p className="text-[10px] text-primary font-bold text-center truncate">{selectedPartData.name}</p>
+              <div className="grid grid-cols-3 gap-1 text-[9px] text-muted-foreground font-mono">
+                <span>X: {selectedPartData.position[0].toFixed(1)}</span>
+                <span>Y: {selectedPartData.position[1].toFixed(1)}</span>
+                <span>Z: {selectedPartData.position[2].toFixed(1)}</span>
               </div>
-              <div className="flex items-center gap-1">
-                <span className="text-[9px] text-muted-foreground w-6">Rot</span>
-                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart('x', 1)}>X+</Button>
-                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart('y', 1)}>Y+</Button>
-                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart('z', 1)}>Z+</Button>
+              <div className="grid grid-cols-3 gap-1 text-[9px] text-muted-foreground font-mono">
+                <span>Rx: {selectedPartData.rotation[0].toFixed(1)}°</span>
+                <span>Ry: {selectedPartData.rotation[1].toFixed(1)}°</span>
+                <span>Rz: {selectedPartData.rotation[2].toFixed(1)}°</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Switch checked={snapToGrid} onCheckedChange={setSnapToGrid} className="scale-75" />
-                <span className={`text-[9px] ${snapToGrid ? 'text-primary' : 'text-muted-foreground'}`}>Snap 5mm</span>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] text-muted-foreground">Pos</span>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(0, -1)}><ArrowLeft className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(0, 1)}><ArrowRight className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(1, 1)}><ArrowUp className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(1, -1)}><ArrowDown className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(2, 1)}><ChevronUp className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(2, -1)}><ChevronDown className="w-3 h-3" /></Button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-muted-foreground">Rot</span>
+                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart(0, 1)}>X+</Button>
+                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart(1, 1)}>Y+</Button>
+                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart(2, 1)}>Z+</Button>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <Switch checked={snapToGrid} onCheckedChange={setSnapToGrid} className="scale-75" />
+                  <span className={`text-[9px] ${snapToGrid ? 'text-primary' : 'text-muted-foreground'}`}>Snap 5mm</span>
+                </div>
               </div>
             </div>
           )}
 
           {/* Canvas */}
           {parts.length > 0 ? (
-            <Canvas shadows camera={{ position: [4, 3, 4], fov: 45, near: 0.001, far: 20000 }} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }} className="!h-full">
+            <Canvas shadows camera={{ position: [4, 3, 4], fov: 45, near: 0.001, far: 20000 }}
+              gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, alpha: true }} className="!h-full">
               <color attach="background" args={['#0a0a0a']} />
-              <AssemblyScene parts={parts} viewMode={viewMode} selectedId={selectedPart} orbitRef={orbitRef} onEstimatedDims={handleEstimatedDims} />
+              <AssemblyScene
+                parts={parts} viewMode={viewMode} selectedId={selectedPart}
+                isolatedId={isolatedPart} hoveredId={hoveredPart}
+                transformMode={transformMode} snapEnabled={snapToGrid}
+                orbitRef={orbitRef}
+                annotations={result?.annotations || []} showAnnotations={showAnnotations}
+                onSelect={handleSelect}
+                onHover={setHoveredPart}
+                onUnhover={() => setHoveredPart(null)}
+                onTransformChange={handleTransformChange}
+                onDeselect={handleDeselect}
+              />
             </Canvas>
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
@@ -700,109 +1077,106 @@ Use the REAL geometric data for accurate analysis. Reference actual part dimensi
         </div>
 
         {/* RIGHT PANEL — Analysis Results */}
-        <div className="w-full lg:w-1/4 border-l border-[#222222] bg-[#111111] border-t-2 border-t-primary overflow-y-auto shrink-0 lg:order-3 order-3">
-          <div className="p-3 space-y-3">
-            {analyzing ? (
-              <div className="flex flex-col items-center justify-center py-16 gap-4">
-                <div className="relative w-16 h-16">
-                  <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
-                  <div className="absolute inset-0 rounded-full border-2 border-t-primary animate-spin" />
-                  <div className="absolute inset-2 rounded-full border-2 border-primary/10" />
-                  <div className="absolute inset-2 rounded-full border-2 border-t-primary/60 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
+        {!isFullscreen && (
+          <div className="w-full lg:w-[28%] border-l border-[#222] bg-[#111111] border-t-2 border-t-primary overflow-y-auto shrink-0">
+            <div className="p-3 space-y-3">
+              {analyzing ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-4">
+                  <div className="relative w-16 h-16">
+                    <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
+                    <div className="absolute inset-0 rounded-full border-2 border-t-primary animate-spin" />
+                    <div className="absolute inset-2 rounded-full border-2 border-primary/10" />
+                    <div className="absolute inset-2 rounded-full border-2 border-t-primary/60 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
+                  </div>
+                  <p className="text-sm text-foreground animate-pulse">{loadingMsg}</p>
+                  <div className="w-full bg-[#222] rounded-full h-1.5">
+                    <div className="bg-primary h-1.5 rounded-full transition-all duration-500" style={{ width: `${loadingProgress}%` }} />
+                  </div>
                 </div>
-                <p className="text-sm text-foreground animate-pulse">{loadingMsg}</p>
-                <div className="w-full bg-[#222222] rounded-full h-1.5">
-                  <div className="bg-primary h-1.5 rounded-full transition-all duration-500" style={{ width: `${loadingProgress}%` }} />
-                </div>
-              </div>
-            ) : result ? (
-              <>
-                {/* Score */}
-                <div className={`rounded-lg p-4 ${getScoreStyle(result.score).bg} border border-[#222222]`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-3xl font-bold text-primary font-display">{result.score}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Assembly Score</p>
+              ) : result ? (
+                <>
+                  {/* Score */}
+                  <div className={`rounded-lg p-4 ${getScoreStyle(result.score).bg} border border-[#222]`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-3xl font-bold text-primary font-display">{result.score}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Assembly Score</p>
+                      </div>
+                      <Badge className={`${getScoreStyle(result.score).badgeColor} text-foreground`}>
+                        {getScoreStyle(result.score).badge}
+                      </Badge>
                     </div>
-                    <Badge className={`${getScoreStyle(result.score).badgeColor} text-foreground`}>
-                      {getScoreStyle(result.score).badge}
-                    </Badge>
                   </div>
-                </div>
 
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-[#0a0a0a] rounded-lg p-2.5 border border-primary/20">
-                    <Link2 className="w-3.5 h-3.5 text-primary mb-1" />
-                    <p className="text-xs font-bold text-foreground">{result.metrics.jointCompatibility}%</p>
-                    <p className="text-[9px] text-muted-foreground">Joint Compat.</p>
+                  {/* Metrics Grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: Link2, value: `${result.metrics.jointCompatibility}%`, label: 'Joint Compat.' },
+                      { icon: Scale, value: `${result.metrics.weightBalance}`, label: 'Weight Balance' },
+                      { icon: Shield, value: `${result.metrics.structuralRating}`, label: 'Structural' },
+                      { icon: Wrench, value: result.metrics.modificationDifficulty, label: 'Mod. Difficulty' },
+                    ].map(({ icon: Icon, value, label }, i) => (
+                      <div key={i} className="bg-[#0a0a0a] rounded-lg p-2.5 border border-primary/20">
+                        <Icon className="w-3.5 h-3.5 text-primary mb-1" />
+                        <p className="text-xs font-bold text-foreground">{value}</p>
+                        <p className="text-[9px] text-muted-foreground">{label}</p>
+                      </div>
+                    ))}
                   </div>
-                  <div className="bg-[#0a0a0a] rounded-lg p-2.5 border border-primary/20">
-                    <Scale className="w-3.5 h-3.5 text-primary mb-1" />
-                    <p className="text-xs font-bold text-foreground">{result.metrics.weightBalance}</p>
-                    <p className="text-[9px] text-muted-foreground">Weight Balance</p>
-                  </div>
-                  <div className="bg-[#0a0a0a] rounded-lg p-2.5 border border-primary/20">
-                    <Shield className="w-3.5 h-3.5 text-primary mb-1" />
-                    <p className="text-xs font-bold text-foreground">{result.metrics.structuralRating}</p>
-                    <p className="text-[9px] text-muted-foreground">Structural</p>
-                  </div>
-                  <div className="bg-[#0a0a0a] rounded-lg p-2.5 border border-primary/20">
-                    <Wrench className="w-3.5 h-3.5 text-primary mb-1" />
-                    <p className="text-xs font-bold text-foreground">{result.metrics.modificationDifficulty}</p>
-                    <p className="text-[9px] text-muted-foreground">Mod. Difficulty</p>
-                  </div>
-                </div>
 
-                {/* AI Report */}
-                <Card className="bg-[#0a0a0a] border-[#222222]">
-                  <CardContent className="pt-4 prose prose-sm prose-invert max-w-none text-xs">
-                    <ReactMarkdown>{result.content}</ReactMarkdown>
-                  </CardContent>
-                </Card>
+                  {/* AI Report */}
+                  <Card className="bg-[#0a0a0a] border-[#222]">
+                    <CardContent className="pt-4 prose prose-sm prose-invert max-w-none text-xs
+                      prose-headings:text-primary prose-headings:font-bold prose-headings:text-sm
+                      prose-strong:text-foreground prose-table:text-[11px]
+                      prose-th:bg-primary/20 prose-th:text-primary prose-th:p-2 prose-th:text-left
+                      prose-td:p-2 prose-td:border-t prose-td:border-[#222]">
+                      <ReactMarkdown>{result.content}</ReactMarkdown>
+                    </CardContent>
+                  </Card>
 
-                {/* Critical Issues */}
-                {result.annotations.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5" /> Critical Issues Found
-                    </h4>
-                    {result.annotations.map(a => {
-                      const borderColor = a.color;
-                      const severityBg = a.severity === 'CRITICAL' ? 'bg-destructive/20' : a.severity === 'HIGH' ? 'bg-orange-500/20' : a.severity === 'MEDIUM' ? 'bg-yellow-500/20' : 'bg-muted/20';
-                      return (
-                        <div key={a.id} className="bg-[#0a0a0a] rounded-lg p-3 border-l-4" style={{ borderLeftColor: borderColor }}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-foreground ${severityBg}`}>
-                              {a.severity}
-                            </span>
-                            <span className="text-xs font-bold text-foreground">{a.title}</span>
-                          </div>
-                          <div className="space-y-1.5">
-                            <div>
-                              <span className="text-[9px] text-muted-foreground uppercase">Problem:</span>
-                              <p className="text-[11px] text-foreground/80">{a.problem}</p>
+                  {/* Annotation Cards */}
+                  {result.annotations.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Critical Issues Found
+                      </h4>
+                      {result.annotations.map(a => {
+                        const severityBg = a.severity === 'CRITICAL' ? 'bg-destructive/20' : a.severity === 'HIGH' ? 'bg-orange-500/20' : a.severity === 'MEDIUM' ? 'bg-yellow-500/20' : 'bg-muted/20';
+                        return (
+                          <div key={a.id} className="bg-[#0a0a0a] rounded-lg p-3 border-l-4" style={{ borderLeftColor: a.color }}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-foreground ${severityBg}`}>
+                                {a.severity}
+                              </span>
+                              <span className="text-xs font-bold text-foreground">{a.title}</span>
                             </div>
-                            <div>
-                              <span className="text-[9px] text-primary uppercase">Solution:</span>
-                              <p className="text-[11px] text-foreground">{a.solution}</p>
+                            <div className="space-y-1.5">
+                              <div>
+                                <span className="text-[9px] text-muted-foreground uppercase">Problem:</span>
+                                <p className="text-[11px] text-foreground/80">{a.problem}</p>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-primary uppercase">Solution:</span>
+                                <p className="text-[11px] text-foreground">{a.solution}</p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-                <Box className="w-10 h-10 text-primary opacity-40" />
-                <p className="text-sm text-foreground">Run Analysis to get engineering report</p>
-                <p className="text-xs text-muted-foreground">Upload your parts, position them, then click Analyze Assembly</p>
-              </div>
-            )}
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                  <Box className="w-10 h-10 text-primary opacity-40" />
+                  <p className="text-sm text-foreground">Run Analysis to get engineering report</p>
+                  <p className="text-xs text-muted-foreground">Upload your parts, position them, then click Analyze Assembly</p>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
