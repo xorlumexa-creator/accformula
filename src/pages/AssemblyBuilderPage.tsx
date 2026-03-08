@@ -345,6 +345,30 @@ function BobbingGroup({ children, isSelected, partId }: { children: React.ReactN
   return <group ref={ref}>{children}</group>;
 }
 
+/* ─── Rotation Ring around selected part ─── */
+function RotationRing({ part }: { part: AssemblyPart }) {
+  const ringRef = useRef<THREE.Mesh>(null);
+  const dims = part.geometry?.dimensions_mm || part.estimatedDims || { x: 10, y: 10, z: 10 };
+  const maxDim = Math.max(dims.x, dims.y, dims.z);
+  const ringRadius = maxDim * 0.7;
+
+  useFrame(({ clock }) => {
+    if (ringRef.current) {
+      // subtle pulse glow
+      const mat = ringRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 0.4 + Math.sin(clock.elapsedTime * 2) * 0.2;
+    }
+  });
+
+  return (
+    <mesh ref={ringRef} position={part.position}
+      rotation={[part.rotation[0] * Math.PI / 180, part.rotation[1] * Math.PI / 180, part.rotation[2] * Math.PI / 180]}>
+      <torusGeometry args={[ringRadius, ringRadius * 0.02, 32, 64]} />
+      <meshStandardMaterial color="#ffffff" emissive="#ff0000" emissiveIntensity={0.5} transparent opacity={0.7} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 /* ─── Auto fit camera ─── */
 function AutoFit({ orbitRef }: { orbitRef: React.RefObject<any> }) {
   const { scene, camera } = useThree();
