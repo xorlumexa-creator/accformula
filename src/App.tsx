@@ -14,6 +14,7 @@ import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
 import SensorIntegrationPage from "./pages/SensorIntegrationPage";
 import FEAAnalysisPage from "./pages/FEAAnalysisPage";
+import AssemblyBuilderPage from "./pages/AssemblyBuilderPage";
 import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import NotFound from "./pages/NotFound";
@@ -54,6 +55,7 @@ const App = () => (
                 <Route path="/lap-calculator" element={<LapCalculatorPage />} />
               <Route path="/sensors" element={<SensorIntegrationPage />} />
               <Route path="/fea" element={<FEAAnalysisPage />} />
+              <Route path="/assembly" element={<AssemblyBuilderPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

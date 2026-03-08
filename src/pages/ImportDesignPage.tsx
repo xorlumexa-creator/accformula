@@ -11,14 +11,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Badge } from '@/components/ui/badge';
 import ReactMarkdown from 'react-markdown';
 import {
   Upload, FileText, Image, Send, Loader2, ChevronRight, ChevronDown, Lightbulb, Sparkles, Thermometer,
-  Triangle, Ruler, AlertTriangle, Shield, Box, Crosshair, Search, ChevronUp,
+  Triangle, Ruler, AlertTriangle, Shield, Box, Crosshair, Search, ChevronUp, CheckCircle, XCircle, Scale,
 } from 'lucide-react';
 import CADViewer, { type Annotation, type STLData, type HeatSensor, type GeometryZone, ZONE_CONFIG } from '@/components/CADViewer';
 import { useTelemetry } from '@/context/TelemetryContext';
 import Papa from 'papaparse';
+
+const PYTHON_API = 'https://1d1141ef-3925-4e14-84d3-439cca800d44-00-38kio9wyr2lpc.sisko.replit.dev:8000/analyze-part';
 
 const cadSoftware = [
   'Fusion 360', 'Blender', 'SolidWorks', 'AutoCAD', 'CATIA',
@@ -46,11 +49,11 @@ const ACCEPTED_IMAGES = 'image/png,image/jpeg,image/webp';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 const ANALYSIS_MESSAGES = [
-  'Analyzing geometry…',
-  'Identifying components…',
-  'Assessing structural risks…',
-  'Evaluating manufacturing feasibility…',
-  'Generating recommendations…',
+  'Processing real dimensions...',
+  'Identifying stress zones...',
+  'Calculating material options...',
+  'Generating annotations...',
+  'Computing design score...',
 ];
 
 const TEMP_PATTERNS = /temp|temperature|thermal|heat|celsius|fahrenheit|kelvin|°c|°f|t_/i;
@@ -62,6 +65,24 @@ const SEVERITY_STYLES: Record<string, { bg: string; border: string; text: string
   MEDIUM: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400' },
   LOW: { bg: 'bg-muted/30', border: 'border-border/30', text: 'text-muted-foreground' },
 };
+
+interface PythonGeoData {
+  dimensions_mm: { x: number; y: number; z: number };
+  volume_mm3: number;
+  surface_area_mm2?: number;
+  center_of_gravity: { x: number; y: number; z: number };
+  is_watertight: boolean;
+  vertex_count: number;
+  face_count: number;
+}
+
+const MATERIALS = [
+  { name: 'Aluminum 6061', density: 2.7, color: 'text-foreground' },
+  { name: 'Carbon Fiber', density: 1.6, color: 'text-foreground' },
+  { name: 'PLA Plastic', density: 1.24, color: 'text-foreground' },
+  { name: 'Steel', density: 7.8, color: 'text-foreground' },
+  { name: 'Titanium', density: 4.43, color: 'text-foreground' },
+];
 
 interface AnalysisResult { content: string; annotations?: Annotation[]; }
 
@@ -77,6 +98,7 @@ export default function ImportDesignPage() {
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisMessage, setAnalysisMessage] = useState('');
+  const [analysisProgress, setAnalysisProgress] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -91,6 +113,18 @@ export default function ImportDesignPage() {
   const [stlData, setStlData] = useState<STLData | null>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
+
+  // Python geometry state
+  const [pythonGeo, setPythonGeo] = useState<PythonGeoData | null>(null);
+  const [pythonLoading, setPythonLoading] = useState(false);
+  const [pythonStatus, setPythonStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>('idle');
+  const [selectedMaterial, setSelectedMaterial] = useState(0);
+
+  // Design score
+  const [designScore, setDesignScore] = useState<number | null>(null);
+
+  // Geometry data panel
+  const [geoExpanded, setGeoExpanded] = useState(false);
 
   // Geometry zones state
   const [showZones, setShowZones] = useState(true);
@@ -115,14 +149,38 @@ export default function ImportDesignPage() {
     if (!analyzing) return;
     let i = 0;
     setAnalysisMessage(ANALYSIS_MESSAGES[0]);
+    setAnalysisProgress(0);
     const interval = setInterval(() => {
       i = (i + 1) % ANALYSIS_MESSAGES.length;
       setAnalysisMessage(ANALYSIS_MESSAGES[i]);
+      setAnalysisProgress(prev => Math.min(90, prev + 15));
     }, 2500);
     return () => clearInterval(interval);
   }, [analyzing]);
 
   const getFileExt = (name: string) => name.split('.').pop()?.toLowerCase() || '';
+
+  // Python geometry fetch
+  const fetchPythonGeo = useCallback(async (file: File) => {
+    setPythonLoading(true);
+    setPythonStatus('loading');
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await fetch(PYTHON_API, { method: 'POST', body: formData, signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error('API error');
+      const data: PythonGeoData = await resp.json();
+      setPythonGeo(data);
+      setPythonStatus('success');
+    } catch {
+      setPythonStatus('failed');
+    } finally {
+      setPythonLoading(false);
+    }
+  }, []);
 
   const loadModel = useCallback((file: File) => {
     const ext = getFileExt(file.name);
@@ -136,8 +194,13 @@ export default function ImportDesignPage() {
     }
     setModelLoading(true);
     setStlData(null);
+    setPythonGeo(null);
+    setPythonStatus('idle');
     setShowZones(true);
     setSelectedZone(null);
+    setDesignScore(null);
+    setResult(null);
+    setAnnotations([]);
     if (modelUrl) URL.revokeObjectURL(modelUrl);
     const url = URL.createObjectURL(file);
     setModelUrl(url);
@@ -145,7 +208,10 @@ export default function ImportDesignPage() {
     setUploadedFile(file);
     setUploadedFileName(file.name);
     setTimeout(() => setModelLoading(false), 300);
-  }, [modelUrl, toast]);
+
+    // Send to Python API immediately
+    fetchPythonGeo(file);
+  }, [modelUrl, toast, fetchPythonGeo]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -249,6 +315,15 @@ export default function ImportDesignPage() {
     finally { setHeatAnalyzing(false); }
   };
 
+  // Volume helper
+  const getVolumeMm3 = () => {
+    if (pythonGeo?.volume_mm3) return pythonGeo.volume_mm3;
+    if (stlData) return stlData.boundingBox.volume;
+    return 0;
+  };
+
+  const getVolumeCm3 = () => getVolumeMm3() / 1000;
+
   // ─── Main Analysis ───
   const handleAnalyze = async () => {
     if (!structuredData.trim() && !uploadedFile) {
@@ -259,6 +334,7 @@ export default function ImportDesignPage() {
     setResult(null);
     setAnnotations([]);
     setSelectedAnnotation(null);
+    setDesignScore(null);
 
     try {
       const { data: projects } = await supabase
@@ -271,47 +347,83 @@ export default function ImportDesignPage() {
         fileContent = await uploadedFile.text();
       }
 
-      let userContent = '';
+      // Build enhanced prompt with Python data
+      const pg = pythonGeo;
+      const dims = pg ? pg.dimensions_mm : stlData ? { x: stlData.boundingBox.width, y: stlData.boundingBox.height, z: stlData.boundingBox.depth } : null;
+      const volume = pg?.volume_mm3 || (stlData ? stlData.boundingBox.volume : 0);
+      const surfaceArea = pg?.surface_area_mm2 || stlData?.surfaceArea || 0;
+      const cog = pg?.center_of_gravity || stlData?.centerOfMass || { x: 0, y: 0, z: 0 };
+      const watertight = pg ? pg.is_watertight : stlData ? !stlData.hasHoles : true;
+      const vertCount = pg?.vertex_count || stlData?.vertexCount || 0;
+      const faceCount = pg?.face_count || stlData?.triangleCount || 0;
+      const selectedMat = MATERIALS[selectedMaterial];
+
+      let userContent = `You are Lumexa Engineering AI analyzing a 3D mechanical design.
+
+USER PROJECT CONTEXT:
+What they are building: ${project?.purpose || project?.project_name || 'Not specified'}
+Budget: ${project?.budget_range || 'Not specified'}
+CAD Software used: ${software || 'Not specified'}
+
+REAL GEOMETRIC DATA ${pg ? 'FROM PYTHON ANALYSIS' : '(Three.js Estimates)'}:
+Part filename: ${uploadedFileName || 'Unknown'}
+Real Dimensions: ${dims ? `${dims.x.toFixed(1)}mm x ${dims.y.toFixed(1)}mm x ${dims.z.toFixed(1)}mm` : 'Unknown'}
+Real Volume: ${volume.toFixed(1)}mm3
+Real Surface Area: ${surfaceArea.toFixed(1)}mm2
+Real Center of Gravity: X:${cog.x.toFixed(2)}mm Y:${cog.y.toFixed(2)}mm Z:${cog.z.toFixed(2)}mm
+Mesh Watertight: ${watertight}
+Vertex Count: ${vertCount}
+Face Count: ${faceCount}
+Estimated Mass ${selectedMat.name}: ${(getVolumeCm3() * selectedMat.density).toFixed(1)}g
+
+MESH QUALITY ASSESSMENT:
+Watertight mesh: ${watertight} ${!watertight ? '— mesh has open boundaries indicating geometry errors' : ''}
+Vertex to face ratio: ${(vertCount / Math.max(faceCount, 1)).toFixed(3)}
+`;
+
       if (stlData) {
-        userContent = `Analyze this engineering component based on REAL extracted geometric data:
-
-COMPONENT DATA:
-- Filename: ${stlData.filename}
-- Triangles: ${stlData.triangleCount.toLocaleString()}
-- Vertices: ${stlData.vertexCount.toLocaleString()}
-- Dimensions: ${stlData.boundingBox.width.toFixed(1)}mm × ${stlData.boundingBox.height.toFixed(1)}mm × ${stlData.boundingBox.depth.toFixed(1)}mm
-- Bounding Volume: ${stlData.boundingBox.volume.toFixed(1)}mm³
-- Surface Area: ${stlData.surfaceArea.toFixed(1)}mm²
-- Aspect ratio: ${stlData.aspectRatio.toFixed(1)}:1
-- Thin section percentage: ${stlData.thinSectionPercent.toFixed(1)}%
-- High density zones: ${stlData.highDensityZones}
-- Estimated wall thickness: ${stlData.estimatedWallThickness.toFixed(2)}mm
-- Has holes/bores: ${stlData.hasHoles}
-- Symmetrical: ${stlData.symmetrical}
-
+        userContent += `
 GEOMETRY ANALYSIS ZONES DETECTED:
 ${stlData.geometryZones.map(z => `- ${z.label} (${z.severity}): ${z.explanation}`).join('\n')}
-
-CAD SOFTWARE: ${software || 'Not specified'}
+Thin section percentage: ${stlData.thinSectionPercent.toFixed(1)}%
+Aspect ratio: ${stlData.aspectRatio.toFixed(1)}:1
 `;
       }
 
-      if (structuredData) userContent += `\nADDITIONAL USER DATA:\n\`\`\`\n${structuredData}\n\`\`\`\n`;
+      if (structuredData) userContent += `\nADDITIONAL DESIGN DATA PROVIDED BY USER:\n\`\`\`\n${structuredData}\n\`\`\`\n`;
       if (fileContent) userContent += `\nUPLOADED FILE (${uploadedFile?.name}):\n\`\`\`\n${fileContent.slice(0, 10000)}\n\`\`\`\n`;
-      if (!userContent.trim()) userContent = `Analyze the following engineering design:\n${software ? `Software: ${software}\n` : ''}${structuredData}`;
+      if (!dims && !structuredData.trim()) userContent = `Analyze the following engineering design:\n${software ? `Software: ${software}\n` : ''}${structuredData}`;
 
-      userContent += `\n\nProvide a comprehensive engineering analysis with these EXACT sections:
+      userContent += `
 
-1. COMPONENT IDENTIFICATION — What is this, what system, industry, manufacturing method
-2. GEOMETRIC INSIGHTS — Dimensional analysis, feature ID, design intent, complexity
-3. STRUCTURAL RISKS — Each risk with name, severity (CRITICAL/HIGH/MEDIUM/LOW), location, explanation, consequence
-4. MATERIAL RECOMMENDATIONS — Best material, alternatives, heat treatment, surface finish
-5. MANUFACTURING ASSESSMENT — Manufacturability, process, tolerances, cost range
-6. OPTIMIZATION RECOMMENDATIONS — Geometry changes, weight reduction, strength improvement with dimensions
-7. NEXT STEPS — Prioritized action list, FEA recs, testing, iterations
+Based on ALL of this real geometric data provide a comprehensive engineering design analysis:
+
+1. COMPONENT IDENTIFICATION — What is this component, what system, industry, manufacturing method
+2. GEOMETRIC INSIGHTS — Analyze real dimensions ${dims ? `[${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)}mm]` : ''} and volume. Design intent, complexity
+3. STRUCTURAL RISKS — Each risk with name (bold), severity CRITICAL/HIGH/MEDIUM/LOW, location, engineering explanation, consequence
+4. MATERIAL RECOMMENDATIONS — Given budget ${project?.budget_range || 'unknown'} and real volume ${volume.toFixed(0)}mm3, recommend optimal material. Calculate exact weight for each option
+5. MANUFACTURING ASSESSMENT — Based on real dimensions assess 3D printability, CNC machinability, tolerance concerns, cost range
+6. OPTIMIZATION RECOMMENDATIONS — Specific geometry changes with exact mm, weight reduction, strength improvement
+7. NEXT STEPS — Prioritized actions referencing real dimensions
 8. DESIGN SCORE — Structural X/10, Manufacturing X/10, Optimization X/10, Overall X/10, Status: CRITICAL/NEEDS WORK/GOOD/EXCELLENT
 
-Be specific, technical and actionable. Use real engineering terminology. Reference actual measurements.`;
+Special rules:
+${!watertight ? '- Mesh is NOT watertight — add CRITICAL annotation for mesh errors' : ''}
+${dims && Math.min(dims.x, dims.y, dims.z) < 2 ? '- Minimum dimension below 2mm — add HIGH annotation for thin wall risk' : ''}
+
+Be specific, technical and actionable. Use real engineering terminology. Reference actual measurements in mm.
+
+Then output JSON annotations:
+\`\`\`annotations-json
+{
+  "annotations": [
+    {"id": 1, "severity": "CRITICAL", "zone": "zone_name", "position_hint": "far_end_top", "title": "Issue Title", "problem": "Detailed problem referencing actual mm from data", "solution": "Specific solution with exact mm", "color": "#ff0000"}
+  ]
+}
+\`\`\`
+
+Severity colors: CRITICAL=#ff0000, HIGH=#ff6600, MEDIUM=#ffaa00, LOW=#888888
+Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, near_end_bottom, middle_top, middle_bottom`;
 
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
@@ -357,13 +469,29 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
       }
 
       // Parse annotations
+      let parsedAnnotations: Annotation[] = [];
       try {
         const match = fullText.match(/```annotations-json\s*([\s\S]*?)```/);
         if (match) {
           const parsed = JSON.parse(match[1]);
-          if (parsed.annotations) setAnnotations(parsed.annotations);
+          if (parsed.annotations) parsedAnnotations = parsed.annotations;
         }
       } catch {}
+
+      setAnnotations(parsedAnnotations);
+
+      // Calculate design score
+      let score = 100;
+      parsedAnnotations.forEach(a => {
+        if (a.severity === 'CRITICAL') score -= 25;
+        else if (a.severity === 'HIGH') score -= 15;
+        else if (a.severity === 'MEDIUM') score -= 8;
+        else score -= 3;
+      });
+      setDesignScore(Math.max(0, score));
+
+      // Clean content (remove JSON annotations from display)
+      setResult({ content: fullText, annotations: parsedAnnotations });
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
@@ -375,6 +503,16 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
   const displayContent = result?.content?.replace(/```annotations-json[\s\S]*?```/g, '').trim();
   const geometryZones = stlData?.geometryZones || [];
   const sortedZones = [...geometryZones].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+  const sortedAnnotations = [...annotations].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+
+  const getScoreStyle = (s: number) => {
+    if (s >= 90) return { bg: 'bg-[#001a00]', badge: 'EXCELLENT', badgeColor: 'bg-green-600', text: 'text-green-400' };
+    if (s >= 80) return { bg: 'bg-[#1a1400]', badge: 'GOOD', badgeColor: 'bg-yellow-600', text: 'text-yellow-400' };
+    if (s >= 60) return { bg: 'bg-[#1a0800]', badge: 'NEEDS WORK', badgeColor: 'bg-orange-600', text: 'text-orange-400' };
+    return { bg: 'bg-[#1a0000]', badge: 'CRITICAL', badgeColor: 'bg-destructive', text: 'text-destructive' };
+  };
+
+  const geoHealth = pythonGeo ? (pythonGeo.is_watertight ? 'Good' : 'Warning') : stlData ? (!stlData.hasHoles ? 'Good' : 'Warning') : 'N/A';
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -423,6 +561,18 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
             )}
           </div>
 
+          {/* Python geometry status */}
+          {pythonStatus === 'loading' && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" /> Extracting geometry...
+            </div>
+          )}
+          {pythonStatus === 'success' && (
+            <div className="flex items-center gap-2 text-xs text-green-400 animate-pulse">
+              <CheckCircle className="w-3 h-3" /> Geometry extracted ✓
+            </div>
+          )}
+
           {/* Upload + Heat Stress buttons */}
           <div className="flex gap-2">
             <input ref={modelInputRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden" onChange={handleModelInput} />
@@ -448,28 +598,29 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
           )}
 
           {/* STL Data Summary */}
-          {stlData && (
+          {(stlData || pythonGeo) && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
                   <Ruler className="w-3 h-3" /> Dimensions
                 </div>
-                <p className="text-xs font-bold text-foreground">
-                  {stlData.boundingBox.width.toFixed(0)}×{stlData.boundingBox.height.toFixed(0)}×{stlData.boundingBox.depth.toFixed(0)}mm
+                <p className="text-xs font-bold text-foreground font-mono">
+                  {pythonGeo ? `${pythonGeo.dimensions_mm.x.toFixed(0)}×${pythonGeo.dimensions_mm.y.toFixed(0)}×${pythonGeo.dimensions_mm.z.toFixed(0)}mm` :
+                    stlData ? `${stlData.boundingBox.width.toFixed(0)}×${stlData.boundingBox.height.toFixed(0)}×${stlData.boundingBox.depth.toFixed(0)}mm` : '—'}
                 </p>
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
                   <Triangle className="w-3 h-3" /> Triangles
                 </div>
-                <p className="text-xs font-bold text-foreground">{stlData.triangleCount.toLocaleString()}</p>
+                <p className="text-xs font-bold text-foreground">{(pythonGeo?.face_count || stlData?.triangleCount || 0).toLocaleString()}</p>
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
                   <AlertTriangle className="w-3 h-3" /> Thin Sections
                 </div>
-                <p className={`text-xs font-bold ${stlData.thinSectionPercent > 30 ? 'text-destructive' : 'text-foreground'}`}>
-                  {stlData.thinSectionPercent.toFixed(1)}%
+                <p className={`text-xs font-bold ${stlData && stlData.thinSectionPercent > 30 ? 'text-destructive' : 'text-foreground'}`}>
+                  {stlData ? `${stlData.thinSectionPercent.toFixed(1)}%` : '—'}
                 </p>
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
@@ -477,6 +628,100 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
                   <Search className="w-3 h-3" /> Zones Found
                 </div>
                 <p className="text-xs font-bold text-primary">{geometryZones.length}</p>
+              </div>
+            </div>
+          )}
+
+          {/* ─── Geometry Data Panel (Collapsible) ─── */}
+          {(pythonGeo || stlData) && (
+            <Collapsible open={geoExpanded} onOpenChange={setGeoExpanded}>
+              <CollapsibleTrigger asChild>
+                <button className="w-full flex items-center justify-between bg-secondary/50 rounded-lg px-3 py-2 border border-border/30 hover:bg-secondary/70 transition-colors">
+                  <span className="text-xs font-medium text-muted-foreground">Geometry Data</span>
+                  {geoExpanded ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="bg-[#0a0a0a] rounded-lg border border-border/30 p-3 mt-1 grid grid-cols-2 gap-x-6 gap-y-2 text-[11px]">
+                  {pythonGeo ? (
+                    <>
+                      <div>
+                        <span className="text-muted-foreground">Dimensions</span>
+                        <p className="text-primary font-mono">{pythonGeo.dimensions_mm.x.toFixed(1)} × {pythonGeo.dimensions_mm.y.toFixed(1)} × {pythonGeo.dimensions_mm.z.toFixed(1)} mm</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Center of Gravity</span>
+                        <p className="text-primary font-mono">X:{pythonGeo.center_of_gravity.x.toFixed(2)} Y:{pythonGeo.center_of_gravity.y.toFixed(2)} Z:{pythonGeo.center_of_gravity.z.toFixed(2)} mm</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Volume</span>
+                        <p className="text-primary font-mono">{pythonGeo.volume_mm3.toFixed(1)} mm³</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Mesh Quality</span>
+                        <p className={`font-mono ${pythonGeo.is_watertight ? 'text-green-400' : 'text-destructive'}`}>
+                          {pythonGeo.is_watertight ? '✓ Watertight' : '✕ Has Errors'}
+                        </p>
+                      </div>
+                      {pythonGeo.surface_area_mm2 && (
+                        <div>
+                          <span className="text-muted-foreground">Surface Area</span>
+                          <p className="text-primary font-mono">{pythonGeo.surface_area_mm2.toFixed(1)} mm²</p>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground">Vertices / Faces</span>
+                        <p className="text-primary font-mono">{pythonGeo.vertex_count.toLocaleString()} / {pythonGeo.face_count.toLocaleString()}</p>
+                      </div>
+                    </>
+                  ) : stlData ? (
+                    <>
+                      <div>
+                        <span className="text-muted-foreground">Dimensions</span>
+                        <p className="text-primary font-mono">{stlData.boundingBox.width.toFixed(1)} × {stlData.boundingBox.height.toFixed(1)} × {stlData.boundingBox.depth.toFixed(1)} mm</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Mesh Quality</span>
+                        <p className={`font-mono ${!stlData.hasHoles ? 'text-green-400' : 'text-destructive'}`}>
+                          {!stlData.hasHoles ? '✓ Watertight' : '✕ Has Holes'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Surface Area</span>
+                        <p className="text-primary font-mono">{stlData.surfaceArea.toFixed(1)} mm²</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Vertices / Faces</span>
+                        <p className="text-primary font-mono">{stlData.vertexCount.toLocaleString()} / {stlData.triangleCount.toLocaleString()}</p>
+                      </div>
+                    </>
+                  ) : null}
+                  {pythonStatus === 'failed' && (
+                    <div className="col-span-2 text-muted-foreground italic text-[10px]">Geometry API offline</div>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
+          {/* ─── Material Weight Calculator ─── */}
+          {(pythonGeo || stlData) && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Material Weight Calculator</p>
+              <div className="space-y-1">
+                {MATERIALS.map((mat, idx) => {
+                  const weight = getVolumeCm3() * mat.density;
+                  const isActive = selectedMaterial === idx;
+                  return (
+                    <button key={mat.name}
+                      onClick={() => setSelectedMaterial(idx)}
+                      className={`w-full flex items-center justify-between bg-[#0a0a0a] rounded px-3 py-1.5 border transition-all text-[11px] ${isActive ? 'border-primary/50 ring-1 ring-primary/30' : 'border-border/20 hover:border-border/40'}`}
+                    >
+                      <span className="text-foreground">{mat.name}</span>
+                      <span className="text-primary font-mono font-bold">{weight.toFixed(1)}g</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -642,13 +887,53 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
               </div>
               <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red">
                 {analyzing ? (
-                  <><Loader2 className="w-4 h-4 animate-spin mr-2" /> {analysisMessage}</>
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" /> {analysisMessage}
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary/20">
+                      <div className="h-full bg-primary transition-all duration-500" style={{ width: `${analysisProgress}%` }} />
+                    </div>
+                  </>
                 ) : (
                   <><Send className="w-4 h-4 mr-2" /> Submit for Analysis</>
                 )}
               </Button>
             </CardContent>
           </Card>
+
+          {/* ─── Design Score Card ─── */}
+          {designScore !== null && (
+            <div className={`rounded-lg p-4 ${getScoreStyle(designScore).bg} border border-[#222222] animate-slide-up`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-3xl font-bold text-primary font-display">{designScore}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Design Score</p>
+                </div>
+                <Badge className={`${getScoreStyle(designScore).badgeColor} text-foreground`}>
+                  {getScoreStyle(designScore).badge}
+                </Badge>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <div className={`flex-1 bg-background/30 rounded px-2 py-1 text-center`}>
+                  <p className={`text-[10px] font-bold ${geoHealth === 'Good' ? 'text-green-400' : 'text-destructive'}`}>{geoHealth}</p>
+                  <p className="text-[9px] text-muted-foreground">Geometry</p>
+                </div>
+                <div className="flex-1 bg-background/30 rounded px-2 py-1 text-center">
+                  <p className={`text-[10px] font-bold ${getScoreStyle(designScore).text}`}>{designScore >= 80 ? 'Good' : designScore >= 60 ? 'Fair' : 'Poor'}</p>
+                  <p className="text-[9px] text-muted-foreground">Structural</p>
+                </div>
+                <div className="flex-1 bg-background/30 rounded px-2 py-1 text-center">
+                  <p className={`text-[10px] font-bold ${stlData && Math.min(stlData.boundingBox.width, stlData.boundingBox.height, stlData.boundingBox.depth) < 1.5 ? 'text-destructive' : 'text-green-400'}`}>
+                    {stlData && Math.min(stlData.boundingBox.width, stlData.boundingBox.height, stlData.boundingBox.depth) < 1.5 ? 'Warning' : 'Ready'}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">Mfg Ready</p>
+                </div>
+                <div className="flex-1 bg-background/30 rounded px-2 py-1 text-center">
+                  <p className="text-[10px] font-bold text-foreground">{(getVolumeCm3() * MATERIALS[selectedMaterial].density).toFixed(0)}g</p>
+                  <p className="text-[9px] text-muted-foreground">Weight</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Analysis Results */}
           {result && displayContent && (
@@ -662,6 +947,41 @@ Be specific, technical and actionable. Use real engineering terminology. Referen
                   <ReactMarkdown>{displayContent}</ReactMarkdown>
                 </CardContent>
               </Card>
+            </div>
+          )}
+
+          {/* ─── Annotation Cards (never raw JSON) ─── */}
+          {sortedAnnotations.length > 0 && (
+            <div className="space-y-2 animate-slide-up">
+              <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" /> Critical Issues Found ({sortedAnnotations.length})
+              </h4>
+              {sortedAnnotations.map(a => {
+                const severityBg = a.severity === 'CRITICAL' ? 'bg-destructive/20' : a.severity === 'HIGH' ? 'bg-orange-500/20' : a.severity === 'MEDIUM' ? 'bg-yellow-500/20' : 'bg-muted/20';
+                return (
+                  <div key={a.id} className="bg-[#0a0a0a] rounded-lg p-3 border-l-4 cursor-pointer hover:ring-1 hover:ring-primary/20 transition-all"
+                    style={{ borderLeftColor: a.color }}
+                    onClick={() => setSelectedAnnotation(selectedAnnotation === a.id ? null : a.id)}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-foreground ${severityBg}`}>
+                        {a.severity}
+                      </span>
+                      <span className="text-xs font-bold text-foreground">{a.title}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div>
+                        <span className="text-[9px] text-muted-foreground uppercase">Problem:</span>
+                        <p className="text-[11px] text-foreground/80">{a.problem}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-green-400 uppercase">Solution:</span>
+                        <p className="text-[11px] text-foreground">{a.solution}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

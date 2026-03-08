@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Upload, BarChart3, MessageSquare, Timer, LogOut, FileInput, Radio, Microscope } from 'lucide-react';
+import { LayoutDashboard, Upload, BarChart3, MessageSquare, Timer, LogOut, FileInput, Radio, Microscope, Box } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import lumexaLogo from '@/assets/lumexa-logo.jpeg';
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/upload', icon: Upload, label: 'Upload' },
   { to: '/import-design', icon: FileInput, label: 'Design' },
+  { to: '/assembly', icon: Box, label: 'Assembly' },
   { to: '/sensors', icon: Radio, label: 'Sensors' },
   { to: '/analysis', icon: BarChart3, label: 'Analysis' },
   { to: '/fea', icon: Microscope, label: 'FEA' },
