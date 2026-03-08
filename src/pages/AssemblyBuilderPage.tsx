@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { Canvas, useThree, useFrame, useLoader, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Html, Grid, TransformControls } from '@react-three/drei';
+import { OrbitControls, Html, Grid } from '@react-three/drei';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -10,16 +10,14 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import ReactMarkdown from 'react-markdown';
 import {
   Upload, Trash2, Eye, EyeOff, Maximize, RotateCcw, Box, Grid3x3,
-  Loader2, Zap, Save, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  RotateCw, ChevronUp, ChevronDown, Crosshair, Star, Download,
-  Link2, Scale, Shield, Wrench, AlertTriangle, Move, Minimize2,
+  Loader2, Zap, Save, Crosshair, Star, Download,
+  Link2, Scale, Shield, Wrench, AlertTriangle, Minimize2,
   ArrowDownToLine, ArrowUpFromLine, FlipVertical, Undo2,
+  Plus, Minus, RotateCw,
 } from 'lucide-react';
 
 const PYTHON_API = 'https://python-1--epicure742.replit.app/analyze-part';
@@ -78,7 +76,6 @@ interface AnalysisResult {
 }
 
 type ViewMode = 'solid' | 'wireframe' | 'xray';
-type TransformMode = 'translate' | 'rotate' | 'scale';
 
 const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
@@ -198,18 +195,20 @@ function getPartMaterial(color: string, viewMode: ViewMode, isSelected: boolean,
     default:
       return new THREE.MeshStandardMaterial({
         color: c, roughness: 0.3, metalness: 0.7,
-        emissive: isSelected ? c : isHovered ? c : new THREE.Color(0x000000),
-        emissiveIntensity: isSelected ? 0.2 : isHovered ? 0.1 : 0,
+        emissive: isSelected ? new THREE.Color('#ff0000') : isHovered ? c : new THREE.Color(0x000000),
+        emissiveIntensity: isSelected ? 0.4 : isHovered ? 0.1 : 0,
         transparent: isIsolatedOther, opacity,
       });
   }
 }
 
-/* ─── Part Mesh component (handles click/hover) ─── */
-function PartMesh({ geometry, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onClick }: {
+/* ─── Part Mesh component ─── */
+function PartMesh({ geometry, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onPointerDown, onClick }: {
   geometry: THREE.BufferGeometry; color: string; viewMode: ViewMode;
   isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
-  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+  onPointerOver: () => void; onPointerOut: () => void;
+  onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
+  onClick: (e: ThreeEvent<MouseEvent>) => void;
 }) {
   const mat = useMemo(() => getPartMaterial(color, viewMode, isSelected, isHovered, isIsolatedOther),
     [color, viewMode, isSelected, isHovered, isIsolatedOther]);
@@ -218,16 +217,19 @@ function PartMesh({ geometry, color, viewMode, isSelected, isHovered, isIsolated
     <mesh geometry={geometry} material={mat} castShadow receiveShadow
       onPointerOver={(e) => { e.stopPropagation(); onPointerOver(); }}
       onPointerOut={onPointerOut}
+      onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e); }}
       onClick={(e) => { e.stopPropagation(); onClick(e); }}
     />
   );
 }
 
 /* ─── STL Part ─── */
-function PartSTL({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onBoundsReady, onPointerOver, onPointerOut, onClick }: {
+function PartSTL({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onBoundsReady, onPointerOver, onPointerOut, onPointerDown, onClick }: {
   url: string; color: string; viewMode: ViewMode; isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
   onBoundsReady?: (dims: { x: number; y: number; z: number }) => void;
-  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+  onPointerOver: () => void; onPointerOut: () => void;
+  onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
+  onClick: (e: ThreeEvent<MouseEvent>) => void;
 }) {
   const geometry = useLoader(STLLoader, url);
   const readyRef = useRef(false);
@@ -239,12 +241,14 @@ function PartSTL({ url, color, viewMode, isSelected, isHovered, isIsolatedOther,
     readyRef.current = true;
   }, [geometry, onBoundsReady]);
 
-  return <PartMesh geometry={geometry} color={color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={isIsolatedOther} onPointerOver={onPointerOver} onPointerOut={onPointerOut} onClick={onClick} />;
+  return <PartMesh geometry={geometry} color={color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={isIsolatedOther} onPointerOver={onPointerOver} onPointerOut={onPointerOut} onPointerDown={onPointerDown} onClick={onClick} />;
 }
 
-function PartOBJ({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onClick }: {
+function PartOBJ({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onPointerDown, onClick }: {
   url: string; color: string; viewMode: ViewMode; isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
-  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+  onPointerOver: () => void; onPointerOut: () => void;
+  onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
+  onClick: (e: ThreeEvent<MouseEvent>) => void;
 }) {
   const obj = useLoader(OBJLoader, url);
   const mat = useMemo(() => getPartMaterial(color, viewMode, isSelected, isHovered, isIsolatedOther),
@@ -253,13 +257,16 @@ function PartOBJ({ url, color, viewMode, isSelected, isHovered, isIsolatedOther,
   return <primitive object={obj}
     onPointerOver={(e: any) => { e.stopPropagation(); onPointerOver(); }}
     onPointerOut={onPointerOut}
+    onPointerDown={(e: any) => { e.stopPropagation(); onPointerDown(e); }}
     onClick={(e: any) => { e.stopPropagation(); onClick(e); }}
   />;
 }
 
-function PartGLTF({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onClick }: {
+function PartGLTF({ url, color, viewMode, isSelected, isHovered, isIsolatedOther, onPointerOver, onPointerOut, onPointerDown, onClick }: {
   url: string; color: string; viewMode: ViewMode; isSelected: boolean; isHovered: boolean; isIsolatedOther: boolean;
-  onPointerOver: () => void; onPointerOut: () => void; onClick: (e: ThreeEvent<MouseEvent>) => void;
+  onPointerOver: () => void; onPointerOut: () => void;
+  onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
+  onClick: (e: ThreeEvent<MouseEvent>) => void;
 }) {
   const gltf = useLoader(GLTFLoader, url);
   const mat = useMemo(() => getPartMaterial(color, viewMode, isSelected, isHovered, isIsolatedOther),
@@ -268,6 +275,7 @@ function PartGLTF({ url, color, viewMode, isSelected, isHovered, isIsolatedOther
   return <primitive object={gltf.scene}
     onPointerOver={(e: any) => { e.stopPropagation(); onPointerOver(); }}
     onPointerOut={onPointerOut}
+    onPointerDown={(e: any) => { e.stopPropagation(); onPointerDown(e); }}
     onClick={(e: any) => { e.stopPropagation(); onClick(e); }}
   />;
 }
@@ -290,7 +298,6 @@ function AnnotationSpheres({ annotations, parts, visible }: {
   }, [parts, visible, annotations.length]);
 
   if (!bbox) return null;
-
 
   const maxDim = Math.max(bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z);
   const sphereSize = maxDim * 0.03;
@@ -345,30 +352,6 @@ function BobbingGroup({ children, isSelected, partId }: { children: React.ReactN
   return <group ref={ref}>{children}</group>;
 }
 
-/* ─── Rotation Ring around selected part ─── */
-function RotationRing({ part }: { part: AssemblyPart }) {
-  const ringRef = useRef<THREE.Mesh>(null);
-  const dims = part.geometry?.dimensions_mm || part.estimatedDims || { x: 10, y: 10, z: 10 };
-  const maxDim = Math.max(dims.x, dims.y, dims.z);
-  const ringRadius = maxDim * 0.7;
-
-  useFrame(({ clock }) => {
-    if (ringRef.current) {
-      // subtle pulse glow
-      const mat = ringRef.current.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.4 + Math.sin(clock.elapsedTime * 2) * 0.2;
-    }
-  });
-
-  return (
-    <mesh ref={ringRef} position={part.position}
-      rotation={[part.rotation[0] * Math.PI / 180, part.rotation[1] * Math.PI / 180, part.rotation[2] * Math.PI / 180]}>
-      <torusGeometry args={[ringRadius, ringRadius * 0.02, 32, 64]} />
-      <meshStandardMaterial color="#ffffff" emissive="#ff0000" emissiveIntensity={0.5} transparent opacity={0.7} side={THREE.DoubleSide} />
-    </mesh>
-  );
-}
-
 /* ─── Auto fit camera ─── */
 function AutoFit({ orbitRef }: { orbitRef: React.RefObject<any> }) {
   const { scene, camera } = useThree();
@@ -390,103 +373,189 @@ function AutoFit({ orbitRef }: { orbitRef: React.RefObject<any> }) {
   return null;
 }
 
-/* ─── TransformGizmo wrapper ─── */
-function PartWithTransform({ part, viewMode, selectedId, isolatedId, hoveredId, transformMode, snapEnabled, orbitRef,
-  onSelect, onHover, onUnhover, onTransformChange }: {
-  part: AssemblyPart; viewMode: ViewMode; selectedId: string | null; isolatedId: string | null;
-  hoveredId: string | null; transformMode: TransformMode; snapEnabled: boolean;
-  orbitRef: React.RefObject<any>;
-  onSelect: (id: string) => void; onHover: (id: string) => void; onUnhover: () => void;
-  onTransformChange: (id: string, pos: [number, number, number], rot: [number, number, number], scale: [number, number, number]) => void;
+/* ─── Spin/Tilt Controls (Html overlay on selected part) ─── */
+function SpinTiltOverlay({ part, spinActive, tiltActive, onSpinDown, onSpinUp, onTiltDown, onTiltUp }: {
+  part: AssemblyPart;
+  spinActive: boolean; tiltActive: boolean;
+  onSpinDown: () => void; onSpinUp: () => void;
+  onTiltDown: () => void; onTiltUp: () => void;
 }) {
-  const transformRef = useRef<any>(null);
-  const groupRef = useRef<THREE.Group>(null);
+  const dims = part.geometry?.dimensions_mm || part.estimatedDims || { x: 10, y: 10, z: 10 };
+  const offset = Math.max(dims.x, dims.y, dims.z) * 0.6;
+
+  return (
+    <group position={part.position}>
+      {/* Floating label above */}
+      <Html center position={[0, offset * 0.8, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="bg-[#111]/90 border border-primary/40 rounded-md px-3 py-1 backdrop-blur-sm whitespace-nowrap">
+          <span className="text-[11px] font-bold text-primary">{part.name}</span>
+        </div>
+      </Html>
+
+      {/* Spin/Tilt buttons below */}
+      <Html center position={[0, -offset * 0.5, 0]}>
+        <div className="flex gap-2 select-none" style={{ touchAction: 'none' }}>
+          <button
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); onSpinDown(); }}
+            onPointerUp={onSpinUp}
+            onPointerLeave={onSpinUp}
+            onPointerCancel={onSpinUp}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all select-none cursor-pointer ${
+              spinActive
+                ? 'bg-red-600 text-white shadow-lg shadow-red-500/30 scale-105'
+                : 'bg-[#1a1a1a] border border-[#333] text-white/80 hover:border-red-500/50 hover:bg-[#222]'
+            }`}
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            Spin
+          </button>
+          <button
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); onTiltDown(); }}
+            onPointerUp={onTiltUp}
+            onPointerLeave={onTiltUp}
+            onPointerCancel={onTiltUp}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all select-none cursor-pointer ${
+              tiltActive
+                ? 'bg-red-600 text-white shadow-lg shadow-red-500/30 scale-105'
+                : 'bg-[#1a1a1a] border border-[#333] text-white/80 hover:border-red-500/50 hover:bg-[#222]'
+            }`}
+          >
+            <RotateCw className="w-3.5 h-3.5 rotate-90" />
+            Tilt
+          </button>
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+/* ─── Continuous rotation driver ─── */
+function RotationDriver({ spinActive, tiltActive, selectedId, onRotate }: {
+  spinActive: boolean; tiltActive: boolean; selectedId: string | null;
+  onRotate: (id: string, axisDeltas: [number, number, number]) => void;
+}) {
+  useFrame((_, delta) => {
+    if (!selectedId) return;
+    const speed = 90; // degrees per second
+    let dx = 0, dy = 0;
+    if (spinActive) dy = speed * delta;
+    if (tiltActive) dx = speed * delta;
+    if (dx !== 0 || dy !== 0) {
+      onRotate(selectedId, [dx, dy, 0]);
+    }
+  });
+  return null;
+}
+
+/* ─── Part Group (draggable) ─── */
+function PartGroup({ part, viewMode, selectedId, isolatedId, hoveredId, onHover, onUnhover, onPointerDown, onClick }: {
+  part: AssemblyPart; viewMode: ViewMode; selectedId: string | null; isolatedId: string | null;
+  hoveredId: string | null;
+  onHover: (id: string) => void; onUnhover: () => void;
+  onPointerDown: (id: string, e: ThreeEvent<PointerEvent>) => void;
+  onClick: (id: string, e: ThreeEvent<MouseEvent>) => void;
+}) {
   const isSelected = selectedId === part.id;
   const isHovered = hoveredId === part.id;
   const isIsolatedOther = isolatedId !== null && isolatedId !== part.id;
 
-  useEffect(() => {
-    if (transformRef.current) {
-      const ctrl = transformRef.current;
-      const cb = () => {
-        if (groupRef.current) {
-          const p = groupRef.current.position;
-          const r = groupRef.current.rotation;
-          const s = groupRef.current.scale;
-          onTransformChange(part.id,
-            [p.x, p.y, p.z],
-            [THREE.MathUtils.radToDeg(r.x), THREE.MathUtils.radToDeg(r.y), THREE.MathUtils.radToDeg(r.z)],
-            [s.x, s.y, s.z]
-          );
-        }
-      };
-      ctrl.addEventListener('objectChange', cb);
-      // Disable orbit while transforming
-      const dragStart = () => { if (orbitRef.current) orbitRef.current.enabled = false; };
-      const dragEnd = () => { if (orbitRef.current) orbitRef.current.enabled = true; };
-      ctrl.addEventListener('mouseDown', dragStart);
-      ctrl.addEventListener('mouseUp', dragEnd);
-      return () => {
-        ctrl.removeEventListener('objectChange', cb);
-        ctrl.removeEventListener('mouseDown', dragStart);
-        ctrl.removeEventListener('mouseUp', dragEnd);
-      };
-    }
-  }, [isSelected, transformMode, part.id, onTransformChange, orbitRef]);
-
-  if (!part.visible && !isIsolatedOther) return null;
-  if (isIsolatedOther) return null;
+  if (!part.visible || isIsolatedOther) return null;
 
   const interactionProps = {
     onPointerOver: () => onHover(part.id),
     onPointerOut: onUnhover,
-    onClick: (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(part.id); },
+    onPointerDown: (e: ThreeEvent<PointerEvent>) => onPointerDown(part.id, e),
+    onClick: (e: ThreeEvent<MouseEvent>) => onClick(part.id, e),
   };
 
-  const partComponent = (
-    <Suspense fallback={<Html center><Loader2 className="w-4 h-4 animate-spin text-red-500" /></Html>}>
-      {part.fileType === 'stl' && <PartSTL url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
-      {part.fileType === 'obj' && <PartOBJ url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
-      {(part.fileType === 'gltf' || part.fileType === 'glb') && <PartGLTF url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
-    </Suspense>
-  );
-
   return (
-    <>
-      <group ref={groupRef}
-        position={part.position}
-        rotation={[part.rotation[0] * Math.PI / 180, part.rotation[1] * Math.PI / 180, part.rotation[2] * Math.PI / 180]}
-        scale={part.scale}
-      >
-        <BobbingGroup isSelected={isSelected} partId={part.id}>
-          {partComponent}
-        </BobbingGroup>
-      </group>
-      {isSelected && groupRef.current && (
-        <TransformControls
-          ref={transformRef}
-          object={groupRef.current}
-          mode={transformMode}
-          translationSnap={snapEnabled ? 5 : undefined}
-          rotationSnap={snapEnabled ? THREE.MathUtils.degToRad(15) : undefined}
-          size={0.8}
-        />
-      )}
-    </>
+    <group
+      position={part.position}
+      rotation={[part.rotation[0] * Math.PI / 180, part.rotation[1] * Math.PI / 180, part.rotation[2] * Math.PI / 180]}
+      scale={part.scale}
+    >
+      <BobbingGroup isSelected={isSelected} partId={part.id}>
+        <Suspense fallback={<Html center><Loader2 className="w-4 h-4 animate-spin text-red-500" /></Html>}>
+          {part.fileType === 'stl' && <PartSTL url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
+          {part.fileType === 'obj' && <PartOBJ url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
+          {(part.fileType === 'gltf' || part.fileType === 'glb') && <PartGLTF url={part.url} color={part.color} viewMode={viewMode} isSelected={isSelected} isHovered={isHovered} isIsolatedOther={false} {...interactionProps} />}
+        </Suspense>
+      </BobbingGroup>
+    </group>
   );
 }
 
 /* ─── Assembly Scene ─── */
-function AssemblyScene({ parts, viewMode, selectedId, isolatedId, hoveredId, transformMode, snapEnabled, orbitRef,
-  annotations, showAnnotations, onSelect, onHover, onUnhover, onTransformChange, onDeselect }: {
+function AssemblyScene({ parts, viewMode, selectedId, isolatedId, hoveredId, orbitRef,
+  spinActive, tiltActive,
+  annotations, showAnnotations,
+  onSelect, onHover, onUnhover, onPartMove, onPartRotate, onDeselect,
+  onSpinDown, onSpinUp, onTiltDown, onTiltUp }: {
   parts: AssemblyPart[]; viewMode: ViewMode; selectedId: string | null; isolatedId: string | null;
-  hoveredId: string | null; transformMode: TransformMode; snapEnabled: boolean;
-  orbitRef: React.RefObject<any>;
+  hoveredId: string | null; orbitRef: React.RefObject<any>;
+  spinActive: boolean; tiltActive: boolean;
   annotations: AssemblyAnnotation[]; showAnnotations: boolean;
   onSelect: (id: string) => void; onHover: (id: string) => void; onUnhover: () => void;
-  onTransformChange: (id: string, pos: [number, number, number], rot: [number, number, number], scale: [number, number, number]) => void;
+  onPartMove: (id: string, pos: [number, number, number]) => void;
+  onPartRotate: (id: string, deltas: [number, number, number]) => void;
   onDeselect: () => void;
+  onSpinDown: () => void; onSpinUp: () => void;
+  onTiltDown: () => void; onTiltUp: () => void;
 }) {
+  const draggingRef = useRef<string | null>(null);
+  const dragOffsetRef = useRef(new THREE.Vector3());
+  const floorPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const hasDraggedRef = useRef(false);
+
+  const handlePartPointerDown = useCallback((id: string, e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    draggingRef.current = id;
+    hasDraggedRef.current = false;
+    // Calculate offset so part doesn't jump to cursor
+    const part = parts.find(p => p.id === id);
+    if (part) {
+      const hitPoint = new THREE.Vector3();
+      e.ray.intersectPlane(floorPlane, hitPoint);
+      dragOffsetRef.current.set(part.position[0] - hitPoint.x, 0, part.position[2] - hitPoint.z);
+    }
+    if (orbitRef.current) orbitRef.current.enabled = false;
+    // @ts-ignore
+    e.target?.setPointerCapture?.(e.pointerId);
+  }, [parts, floorPlane, orbitRef]);
+
+  const handlePartClick = useCallback((id: string, e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (!hasDraggedRef.current) {
+      onSelect(id);
+    }
+  }, [onSelect]);
+
+  const handleScenePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (!draggingRef.current) return;
+    hasDraggedRef.current = true;
+    const hitPoint = new THREE.Vector3();
+    e.ray.intersectPlane(floorPlane, hitPoint);
+    if (hitPoint) {
+      const part = parts.find(p => p.id === draggingRef.current);
+      if (part) {
+        onPartMove(draggingRef.current, [
+          hitPoint.x + dragOffsetRef.current.x,
+          part.position[1],
+          hitPoint.z + dragOffsetRef.current.z,
+        ]);
+      }
+    }
+  }, [floorPlane, parts, onPartMove]);
+
+  const handleScenePointerUp = useCallback(() => {
+    if (draggingRef.current) {
+      draggingRef.current = null;
+      if (orbitRef.current) orbitRef.current.enabled = true;
+    }
+  }, [orbitRef]);
+
+  const selectedPartData = parts.find(p => p.id === selectedId);
+
   return (
     <>
       <ambientLight intensity={0.35} />
@@ -494,24 +563,37 @@ function AssemblyScene({ parts, viewMode, selectedId, isolatedId, hoveredId, tra
       <directionalLight position={[-6, 4, -2]} intensity={0.5} color="#f0f0ff" />
       <pointLight position={[0, -3, 0]} intensity={0.15} color="#ff2200" />
 
-      {/* Click on background to deselect */}
-      <mesh position={[0, -100, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={onDeselect}>
+      {/* Invisible drag surface + deselect plane */}
+      <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}
+        onPointerMove={handleScenePointerMove}
+        onPointerUp={handleScenePointerUp}
+        onClick={(e) => { if (!hasDraggedRef.current) { e.stopPropagation(); onDeselect(); } }}
+      >
         <planeGeometry args={[10000, 10000]} />
         <meshBasicMaterial visible={false} />
       </mesh>
 
       {parts.filter(p => p.visible).map(part => (
-        <PartWithTransform key={part.id} part={part} viewMode={viewMode} selectedId={selectedId}
-          isolatedId={isolatedId} hoveredId={hoveredId} transformMode={transformMode}
-          snapEnabled={snapEnabled} orbitRef={orbitRef}
-          onSelect={onSelect} onHover={onHover} onUnhover={onUnhover} onTransformChange={onTransformChange} />
+        <PartGroup key={part.id} part={part} viewMode={viewMode} selectedId={selectedId}
+          isolatedId={isolatedId} hoveredId={hoveredId}
+          onHover={onHover} onUnhover={onUnhover}
+          onPointerDown={handlePartPointerDown}
+          onClick={handlePartClick}
+        />
       ))}
 
-      {/* Rotation ring around selected part */}
-      {selectedId && (() => {
-        const sp = parts.find(p => p.id === selectedId);
-        return sp ? <RotationRing part={sp} /> : null;
-      })()}
+      {/* Spin/Tilt overlay on selected part */}
+      {selectedPartData && (
+        <SpinTiltOverlay part={selectedPartData}
+          spinActive={spinActive} tiltActive={tiltActive}
+          onSpinDown={onSpinDown} onSpinUp={onSpinUp}
+          onTiltDown={onTiltDown} onTiltUp={onTiltUp}
+        />
+      )}
+
+      {/* Continuous rotation driver */}
+      <RotationDriver spinActive={spinActive} tiltActive={tiltActive}
+        selectedId={selectedId} onRotate={onPartRotate} />
 
       <AnnotationSpheres annotations={annotations} parts={parts} visible={showAnnotations} />
 
@@ -551,8 +633,6 @@ export default function AssemblyBuilderPage() {
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
   const [isolatedPart, setIsolatedPart] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('solid');
-  const [transformMode, setTransformMode] = useState<TransformMode>('translate');
-  const [snapToGrid, setSnapToGrid] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
@@ -560,6 +640,9 @@ export default function AssemblyBuilderPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [backendOffline, setBackendOffline] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFineControl, setShowFineControl] = useState(false);
+  const [spinActive, setSpinActive] = useState(false);
+  const [tiltActive, setTiltActive] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const orbitRef = useRef<any>(null);
   const lastClickRef = useRef<{ id: string; time: number } | null>(null);
@@ -568,10 +651,7 @@ export default function AssemblyBuilderPage() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 't' || e.key === 'T') setTransformMode('translate');
-      if (e.key === 'r' || e.key === 'R') setTransformMode('rotate');
-      if (e.key === 's' || e.key === 'S') setTransformMode('scale');
-      if (e.key === 'Escape') { setSelectedPart(null); setIsolatedPart(null); }
+      if (e.key === 'Escape') { setSelectedPart(null); setIsolatedPart(null); setShowFineControl(false); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -621,7 +701,6 @@ export default function AssemblyBuilderPage() {
     setParts(prev => [...prev, newPart]);
     setSelectedPart(id);
 
-    // Fetch Python geometry
     const geo = await fetchPythonGeometry(file);
     if (geo) {
       setParts(prev => prev.map(p => p.id === id ? { ...p, geometry: geo, geometrySource: 'python' as const } : p));
@@ -633,21 +712,35 @@ export default function AssemblyBuilderPage() {
   const handleSelect = useCallback((id: string) => {
     const now = Date.now();
     if (lastClickRef.current && lastClickRef.current.id === id && now - lastClickRef.current.time < 400) {
-      // Double click → isolate
-      setIsolatedPart(prev => prev === id ? null : id);
+      // Double click → show fine control
+      setShowFineControl(prev => !prev);
       lastClickRef.current = null;
       return;
     }
     lastClickRef.current = { id, time: now };
-    setSelectedPart(prev => prev === id ? null : id);
+    setSelectedPart(id);
+    setShowFineControl(false);
   }, []);
 
   const handleDeselect = useCallback(() => {
     setSelectedPart(null);
+    setShowFineControl(false);
+    setSpinActive(false);
+    setTiltActive(false);
   }, []);
 
-  const handleTransformChange = useCallback((id: string, pos: [number, number, number], rot: [number, number, number], scale: [number, number, number]) => {
-    setParts(prev => prev.map(p => p.id === id ? { ...p, position: pos, rotation: rot, scale } : p));
+  const handlePartMove = useCallback((id: string, pos: [number, number, number]) => {
+    setParts(prev => prev.map(p => p.id === id ? { ...p, position: pos } : p));
+  }, []);
+
+  const handlePartRotate = useCallback((id: string, deltas: [number, number, number]) => {
+    setParts(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      return {
+        ...p,
+        rotation: [p.rotation[0] + deltas[0], p.rotation[1] + deltas[1], p.rotation[2] + deltas[2]] as [number, number, number],
+      };
+    }));
   }, []);
 
   const removePart = (id: string) => {
@@ -656,7 +749,7 @@ export default function AssemblyBuilderPage() {
       if (part) URL.revokeObjectURL(part.url);
       return prev.filter(p => p.id !== id);
     });
-    if (selectedPart === id) setSelectedPart(null);
+    if (selectedPart === id) { setSelectedPart(null); setShowFineControl(false); }
     if (isolatedPart === id) setIsolatedPart(null);
   };
 
@@ -664,18 +757,19 @@ export default function AssemblyBuilderPage() {
     setParts(prev => prev.map(p => p.id === id ? { ...p, visible: !p.visible } : p));
   };
 
-  const movePart = (axis: 0 | 1 | 2, delta: number) => {
+  // Fine control: move 1mm
+  const fineMove = (axis: 0 | 1 | 2, delta: number) => {
     if (!selectedPart) return;
-    const step = snapToGrid ? 5 : 1;
     setParts(prev => prev.map(p => {
       if (p.id !== selectedPart) return p;
       const pos = [...p.position] as [number, number, number];
-      pos[axis] += delta * step;
+      pos[axis] += delta;
       return { ...p, position: pos };
     }));
   };
 
-  const rotatePart = (axis: 0 | 1 | 2, delta: number) => {
+  // Fine control: rotate 15°
+  const fineRotate = (axis: 0 | 1 | 2, delta: number) => {
     if (!selectedPart) return;
     setParts(prev => prev.map(p => {
       if (p.id !== selectedPart) return p;
@@ -697,7 +791,7 @@ export default function AssemblyBuilderPage() {
     const duration = 400;
     const animate = (now: number) => {
       const t = Math.min(1, (now - startTime) / duration);
-      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
       const current: [number, number, number] = [
         startRot[0] + (targetRot[0] - startRot[0]) * ease,
         startRot[1] + (targetRot[1] - startRot[1]) * ease,
@@ -743,6 +837,7 @@ export default function AssemblyBuilderPage() {
     setSelectedPart(null);
     setIsolatedPart(null);
     setResult(null);
+    setShowFineControl(false);
   };
 
   /* ─── Run Analysis ─── */
@@ -912,12 +1007,6 @@ Reference actual part names and real dimensions throughout. Give specific measur
     { mode: 'xray', icon: Eye, label: 'X-Ray' },
   ];
 
-  const transformButtons: { mode: TransformMode; label: string; key: string }[] = [
-    { mode: 'translate', label: 'T', key: 'T' },
-    { mode: 'rotate', label: 'R', key: 'R' },
-    { mode: 'scale', label: 'S', key: 'S' },
-  ];
-
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col">
       {/* Top Bar */}
@@ -1045,24 +1134,8 @@ Reference actual part names and real dimensions throughout. Give specific measur
             </div>
           )}
 
-          {/* Transform mode buttons top-left */}
+          {/* View mode buttons top-left */}
           <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5">
-            {transformButtons.map(({ mode, label, key }) => (
-              <Tooltip key={mode}>
-                <TooltipTrigger asChild>
-                  <Button size="sm"
-                    variant={transformMode === mode ? 'default' : 'secondary'}
-                    className="h-7 w-7 p-0 text-xs font-bold"
-                    onClick={() => setTransformMode(mode)}>
-                    {label}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">{mode.charAt(0).toUpperCase() + mode.slice(1)} ({key})</p>
-                </TooltipContent>
-              </Tooltip>
-            ))}
-            <div className="w-px h-5 bg-[#333] mx-1" />
             {viewButtons.map(({ mode, icon: Icon, label }) => (
               <Button key={mode} size="sm" variant={viewMode === mode ? 'default' : 'secondary'} className="h-7 px-2 text-xs gap-1" onClick={() => setViewMode(mode)}>
                 <Icon className="w-3.5 h-3.5" />
@@ -1094,44 +1167,55 @@ Reference actual part names and real dimensions throughout. Give specific measur
             Parts in scene: {parts.filter(p => p.visible).length}
           </div>
 
-          {/* Transform panel bottom-center */}
-          {selectedPartData && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-[#111]/90 backdrop-blur-md border border-[#222] rounded-lg p-3 space-y-2 min-w-[240px]">
-              <p className="text-[10px] text-primary font-bold text-center truncate">{selectedPartData.name}</p>
-              <div className="grid grid-cols-3 gap-1 text-[9px] text-muted-foreground font-mono">
-                <span>X: {selectedPartData.position[0].toFixed(1)}</span>
-                <span>Y: {selectedPartData.position[1].toFixed(1)}</span>
-                <span>Z: {selectedPartData.position[2].toFixed(1)}</span>
+          {/* Fine Control Popup — shown on double-tap */}
+          {showFineControl && selectedPartData && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 bg-[#111]/95 backdrop-blur-md border border-[#333] rounded-xl p-3 space-y-3 min-w-[260px]">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-primary font-bold truncate">{selectedPartData.name}</p>
+                <button onClick={() => setShowFineControl(false)} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
               </div>
-              <div className="grid grid-cols-3 gap-1 text-[9px] text-muted-foreground font-mono">
-                <span>Rx: {selectedPartData.rotation[0].toFixed(1)}°</span>
-                <span>Ry: {selectedPartData.rotation[1].toFixed(1)}°</span>
-                <span>Rz: {selectedPartData.rotation[2].toFixed(1)}°</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <span className="text-[9px] text-muted-foreground">Pos</span>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(0, -1)}><ArrowLeft className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(0, 1)}><ArrowRight className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(1, 1)}><ArrowUp className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(1, -1)}><ArrowDown className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(2, 1)}><ChevronUp className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => movePart(2, -1)}><ChevronDown className="w-3 h-3" /></Button>
+
+              {/* Position fine control */}
+              <div className="space-y-1.5">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Position (±1mm)</p>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+                    <div key={axis} className="flex items-center gap-0.5">
+                      <span className="text-[9px] text-muted-foreground w-3">{axis}</span>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => fineMove(i as 0|1|2, -1)}>
+                        <Minus className="w-3 h-3" />
+                      </Button>
+                      <span className="text-[9px] text-foreground font-mono w-8 text-center">{selectedPartData.position[i].toFixed(0)}</span>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => fineMove(i as 0|1|2, 1)}>
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-muted-foreground">Rot</span>
-                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart(0, 1)}>X+</Button>
-                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart(1, 1)}>Y+</Button>
-                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[9px]" onClick={() => rotatePart(2, 1)}>Z+</Button>
-                <div className="ml-auto flex items-center gap-1.5">
-                  <Switch checked={snapToGrid} onCheckedChange={setSnapToGrid} className="scale-75" />
-                  <span className={`text-[9px] ${snapToGrid ? 'text-primary' : 'text-muted-foreground'}`}>Snap 5mm</span>
+
+              {/* Rotation fine control */}
+              <div className="space-y-1.5">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Rotation (±15°)</p>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+                    <div key={axis} className="flex items-center gap-0.5">
+                      <span className="text-[9px] text-muted-foreground w-3">{axis}</span>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => fineRotate(i as 0|1|2, -15)}>
+                        <Minus className="w-3 h-3" />
+                      </Button>
+                      <span className="text-[9px] text-foreground font-mono w-8 text-center">{selectedPartData.rotation[i].toFixed(0)}°</span>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => fineRotate(i as 0|1|2, 15)}>
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               </div>
-              {/* Orientation quick buttons */}
-              <div className="border-t border-[#333] pt-2 mt-1">
-                <p className="text-[9px] text-muted-foreground mb-1.5">Quick Orientation</p>
+
+              {/* Quick Orientation */}
+              <div className="border-t border-[#333] pt-2">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1.5">Quick Orientation</p>
                 <div className="grid grid-cols-4 gap-1">
                   <Button size="sm" variant="secondary" className="h-7 text-[8px] px-1 gap-0.5 flex-col leading-none py-0.5" onClick={layFlat}>
                     <ArrowDownToLine className="w-3 h-3 text-primary" />
@@ -1151,25 +1235,34 @@ Reference actual part names and real dimensions throughout. Give specific measur
                   </Button>
                 </div>
               </div>
+
+              <p className="text-[8px] text-muted-foreground/50 text-center">Double-tap part to toggle this panel</p>
             </div>
           )}
 
           {/* Canvas */}
           {parts.length > 0 ? (
             <Canvas shadows camera={{ position: [4, 3, 4], fov: 45, near: 0.001, far: 20000 }}
-              gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, alpha: true }} className="!h-full">
+              gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, alpha: true }} className="!h-full"
+              style={{ touchAction: 'none' }}
+            >
               <color attach="background" args={['#0a0a0a']} />
               <AssemblyScene
                 parts={parts} viewMode={viewMode} selectedId={selectedPart}
                 isolatedId={isolatedPart} hoveredId={hoveredPart}
-                transformMode={transformMode} snapEnabled={snapToGrid}
                 orbitRef={orbitRef}
+                spinActive={spinActive} tiltActive={tiltActive}
                 annotations={result?.annotations || []} showAnnotations={showAnnotations}
                 onSelect={handleSelect}
                 onHover={setHoveredPart}
                 onUnhover={() => setHoveredPart(null)}
-                onTransformChange={handleTransformChange}
+                onPartMove={handlePartMove}
+                onPartRotate={handlePartRotate}
                 onDeselect={handleDeselect}
+                onSpinDown={() => setSpinActive(true)}
+                onSpinUp={() => setSpinActive(false)}
+                onTiltDown={() => setTiltActive(true)}
+                onTiltUp={() => setTiltActive(false)}
               />
             </Canvas>
           ) : (
