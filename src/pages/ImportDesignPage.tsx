@@ -16,6 +16,7 @@ import ReactMarkdown from 'react-markdown';
 import {
   Upload, FileText, Image, Send, Loader2, ChevronRight, ChevronDown, Lightbulb, Sparkles, Thermometer,
   Triangle, Ruler, AlertTriangle, Shield, Box, Crosshair, Search, ChevronUp, CheckCircle, XCircle, Scale,
+  X, Eye, Target, Wrench,
 } from 'lucide-react';
 import CADViewer, { type Annotation, type STLData, type HeatSensor, type GeometryZone, ZONE_CONFIG } from '@/components/CADViewer';
 import { useTelemetry } from '@/context/TelemetryContext';
@@ -59,11 +60,11 @@ const ANALYSIS_MESSAGES = [
 const TEMP_PATTERNS = /temp|temperature|thermal|heat|celsius|fahrenheit|kelvin|°c|°f|t_/i;
 
 const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
-const SEVERITY_STYLES: Record<string, { bg: string; border: string; text: string }> = {
-  CRITICAL: { bg: 'bg-destructive/10', border: 'border-destructive/30', text: 'text-destructive' },
-  HIGH: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400' },
-  MEDIUM: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400' },
-  LOW: { bg: 'bg-muted/30', border: 'border-border/30', text: 'text-muted-foreground' },
+const SEVERITY_STYLES: Record<string, { bg: string; border: string; text: string; icon: string }> = {
+  CRITICAL: { bg: 'bg-destructive/10', border: 'border-destructive/30', text: 'text-destructive', icon: '🔴' },
+  HIGH: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400', icon: '🟠' },
+  MEDIUM: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: '🟡' },
+  LOW: { bg: 'bg-muted/30', border: 'border-border/30', text: 'text-muted-foreground', icon: '🟢' },
 };
 
 interface PythonGeoData {
@@ -140,6 +141,9 @@ export default function ImportDesignPage() {
   const [heatAnalysis, setHeatAnalysis] = useState<string | null>(null);
   const [heatAnalyzing, setHeatAnalyzing] = useState(false);
 
+  // Detail panel for annotation
+  const [detailAnnotation, setDetailAnnotation] = useState<Annotation | null>(null);
+
   // Collapsible sections
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const toggleSection = (key: string) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -159,6 +163,35 @@ export default function ImportDesignPage() {
   }, [analyzing]);
 
   const getFileExt = (name: string) => name.split('.').pop()?.toLowerCase() || '';
+
+  // When annotation selected on 3D viewer, open detail panel
+  const handleSelectAnnotation = useCallback((id: number | null) => {
+    setSelectedAnnotation(id);
+    if (id !== null) {
+      const ann = annotations.find(a => a.id === id);
+      if (ann) setDetailAnnotation(ann);
+    } else {
+      setDetailAnnotation(null);
+    }
+  }, [annotations]);
+
+  // Mark annotation as resolved
+  const handleResolveAnnotation = useCallback((id: number) => {
+    setAnnotations(prev => prev.map(a => a.id === id ? { ...a, resolved: true } : a));
+    // Recalculate score
+    setAnnotations(prev => {
+      let score = 100;
+      prev.forEach(a => {
+        if (a.resolved) return;
+        if (a.severity === 'CRITICAL') score -= 25;
+        else if (a.severity === 'HIGH') score -= 15;
+        else if (a.severity === 'MEDIUM') score -= 8;
+        else score -= 3;
+      });
+      setDesignScore(Math.max(0, score));
+      return prev;
+    });
+  }, []);
 
   // Python geometry fetch
   const fetchPythonGeo = useCallback(async (file: File) => {
@@ -201,6 +234,7 @@ export default function ImportDesignPage() {
     setDesignScore(null);
     setResult(null);
     setAnnotations([]);
+    setDetailAnnotation(null);
     if (modelUrl) URL.revokeObjectURL(modelUrl);
     const url = URL.createObjectURL(file);
     setModelUrl(url);
@@ -208,8 +242,6 @@ export default function ImportDesignPage() {
     setUploadedFile(file);
     setUploadedFileName(file.name);
     setTimeout(() => setModelLoading(false), 300);
-
-    // Send to Python API immediately
     fetchPythonGeo(file);
   }, [modelUrl, toast, fetchPythonGeo]);
 
@@ -334,6 +366,7 @@ export default function ImportDesignPage() {
     setResult(null);
     setAnnotations([]);
     setSelectedAnnotation(null);
+    setDetailAnnotation(null);
     setDesignScore(null);
 
     try {
@@ -347,7 +380,6 @@ export default function ImportDesignPage() {
         fileContent = await uploadedFile.text();
       }
 
-      // Build enhanced prompt with Python data
       const pg = pythonGeo;
       const dims = pg ? pg.dimensions_mm : stlData ? { x: stlData.boundingBox.width, y: stlData.boundingBox.height, z: stlData.boundingBox.depth } : null;
       const volume = pg?.volume_mm3 || (stlData ? stlData.boundingBox.volume : 0);
@@ -423,7 +455,8 @@ Then output JSON annotations:
 \`\`\`
 
 Severity colors: CRITICAL=#ff0000, HIGH=#ff6600, MEDIUM=#ffaa00, LOW=#888888
-Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, near_end_bottom, middle_top, middle_bottom`;
+Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, near_end_bottom, middle_top, middle_bottom, left_side, right_side
+Minimum 3 annotations maximum 8. Spread across different positions.`;
 
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
@@ -490,7 +523,6 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
       });
       setDesignScore(Math.max(0, score));
 
-      // Clean content (remove JSON annotations from display)
       setResult({ content: fullText, annotations: parsedAnnotations });
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
@@ -504,6 +536,7 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
   const geometryZones = stlData?.geometryZones || [];
   const sortedZones = [...geometryZones].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
   const sortedAnnotations = [...annotations].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+  const unresolvedCount = annotations.filter(a => !a.resolved).length;
 
   const getScoreStyle = (s: number) => {
     if (s >= 90) return { bg: 'bg-[#001a00]', badge: 'EXCELLENT', badgeColor: 'bg-green-600', text: 'text-green-400' };
@@ -522,44 +555,22 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
           <FileText className="w-5 h-5 text-primary" />
         </div>
         <div>
-          <h2 className="text-xl font-bold font-display tracking-wide">Import Design Data</h2>
-          <p className="text-sm text-muted-foreground">Upload 3D models, extract geometry, and submit for AI analysis</p>
+          <h2 className="text-xl font-bold font-display tracking-wide">CAD Design Analysis</h2>
+          <p className="text-sm text-muted-foreground">Upload 3D models, extract geometry, detect issues with AI-powered annotations</p>
         </div>
       </div>
 
-      {/* Split layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LEFT — 3D Viewer */}
-        <div className="space-y-3">
-          <div
-            className={`relative transition-all ${dragOver ? 'ring-2 ring-primary' : ''}`}
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-          >
-            <CADViewer
-              fileUrl={modelUrl}
-              fileType={modelType}
-              loading={modelLoading}
-              className="h-[40vh] lg:h-[520px]"
-              annotations={annotations}
-              selectedAnnotation={selectedAnnotation}
-              onSelectAnnotation={setSelectedAnnotation}
-              onSTLParsed={handleSTLParsed}
-              heatSensors={heatSensors}
-              heatMode={heatMode}
-              heatOpacity={heatOpacity / 100}
-              geometryZones={geometryZones}
-              showZones={showZones && !heatMode}
-              selectedZone={selectedZone}
-              onSelectZone={setSelectedZone}
-            />
-            {dragOver && (
-              <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center z-20">
-                <p className="text-primary font-semibold">Drop 3D file here</p>
-              </div>
-            )}
-          </div>
+      {/* Three-panel layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+        {/* LEFT PANEL — Parts List & Controls */}
+        <div className="lg:col-span-3 space-y-3 order-2 lg:order-1">
+          {/* Upload zone */}
+          <input ref={modelInputRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden" onChange={handleModelInput} />
+          <Button variant="outline" className="w-full gap-2 text-xs h-9" onClick={() => modelInputRef.current?.click()}>
+            <Upload className="w-3.5 h-3.5" />
+            <span className="truncate">{uploadedFile ? uploadedFile.name : 'Upload 3D Model'}</span>
+          </Button>
 
           {/* Python geometry status */}
           {pythonStatus === 'loading' && (
@@ -568,38 +579,29 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
             </div>
           )}
           {pythonStatus === 'success' && (
-            <div className="flex items-center gap-2 text-xs text-green-400 animate-pulse">
+            <div className="flex items-center gap-2 text-xs text-green-400">
               <CheckCircle className="w-3 h-3" /> Geometry extracted ✓
             </div>
           )}
 
-          {/* Upload + Heat Stress buttons */}
-          <div className="flex gap-2">
-            <input ref={modelInputRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden" onChange={handleModelInput} />
-            <Button variant="outline" className="flex-1 gap-2" onClick={() => modelInputRef.current?.click()}>
-              <Upload className="w-4 h-4" />
-              <span className="truncate">{uploadedFile ? uploadedFile.name : 'Upload 3D Model (STL, OBJ, GLTF, GLB)'}</span>
+          {/* Heat Stress toggle */}
+          {modelUrl && modelType === 'stl' && (
+            <Button variant={heatMode ? 'default' : 'secondary'} className="w-full gap-2 text-xs h-9" onClick={handleHeatStressToggle}>
+              <Thermometer className="w-3.5 h-3.5" /> Heat Stress
             </Button>
-            {modelUrl && modelType === 'stl' && (
-              <Button variant={heatMode ? 'default' : 'secondary'} className="gap-1.5" onClick={handleHeatStressToggle}>
-                <Thermometer className="w-4 h-4" />
-                <span className="hidden sm:inline">Heat</span>
-              </Button>
-            )}
-          </div>
+          )}
 
-          {/* Heat opacity slider */}
           {heatMode && (
             <div className="flex items-center gap-3 px-1">
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">Heat Overlay:</span>
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">Overlay:</span>
               <Slider value={[heatOpacity]} onValueChange={([v]) => setHeatOpacity(v)} min={10} max={100} step={5} className="flex-1" />
               <span className="text-[10px] text-muted-foreground w-8">{heatOpacity}%</span>
             </div>
           )}
 
-          {/* STL Data Summary */}
+          {/* Quick stats */}
           {(stlData || pythonGeo) && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="space-y-1.5">
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
                   <Ruler className="w-3 h-3" /> Dimensions
@@ -611,28 +613,26 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                  <Triangle className="w-3 h-3" /> Triangles
+                  <Triangle className="w-3 h-3" /> Mesh
                 </div>
-                <p className="text-xs font-bold text-foreground">{(pythonGeo?.face_count || stlData?.triangleCount || 0).toLocaleString()}</p>
+                <p className="text-xs font-bold text-foreground">{(pythonGeo?.face_count || stlData?.triangleCount || 0).toLocaleString()} faces</p>
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                  <AlertTriangle className="w-3 h-3" /> Thin Sections
+                  <Shield className="w-3 h-3" /> Health
                 </div>
-                <p className={`text-xs font-bold ${stlData && stlData.thinSectionPercent > 30 ? 'text-destructive' : 'text-foreground'}`}>
-                  {stlData ? `${stlData.thinSectionPercent.toFixed(1)}%` : '—'}
-                </p>
+                <p className={`text-xs font-bold ${geoHealth === 'Good' ? 'text-green-400' : 'text-destructive'}`}>{geoHealth === 'Good' ? '✓ Watertight' : '✕ Issues'}</p>
               </div>
               <div className="bg-secondary/50 rounded-lg px-3 py-2 border border-border/30">
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                  <Search className="w-3 h-3" /> Zones Found
+                  <Search className="w-3 h-3" /> Issues
                 </div>
-                <p className="text-xs font-bold text-primary">{geometryZones.length}</p>
+                <p className="text-xs font-bold text-primary">{geometryZones.length} zones · {annotations.length} annotations</p>
               </div>
             </div>
           )}
 
-          {/* ─── Geometry Data Panel (Collapsible) ─── */}
+          {/* Geometry Data Panel */}
           {(pythonGeo || stlData) && (
             <Collapsible open={geoExpanded} onOpenChange={setGeoExpanded}>
               <CollapsibleTrigger asChild>
@@ -642,7 +642,7 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="bg-[#0a0a0a] rounded-lg border border-border/30 p-3 mt-1 grid grid-cols-2 gap-x-6 gap-y-2 text-[11px]">
+                <div className="bg-card rounded-lg border border-border/30 p-3 mt-1 space-y-2 text-[11px]">
                   {pythonGeo ? (
                     <>
                       <div>
@@ -651,17 +651,11 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
                       </div>
                       <div>
                         <span className="text-muted-foreground">Center of Gravity</span>
-                        <p className="text-primary font-mono">X:{pythonGeo.center_of_gravity.x.toFixed(2)} Y:{pythonGeo.center_of_gravity.y.toFixed(2)} Z:{pythonGeo.center_of_gravity.z.toFixed(2)} mm</p>
+                        <p className="text-primary font-mono">X:{pythonGeo.center_of_gravity.x.toFixed(2)} Y:{pythonGeo.center_of_gravity.y.toFixed(2)} Z:{pythonGeo.center_of_gravity.z.toFixed(2)}</p>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Volume</span>
                         <p className="text-primary font-mono">{pythonGeo.volume_mm3.toFixed(1)} mm³</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Mesh Quality</span>
-                        <p className={`font-mono ${pythonGeo.is_watertight ? 'text-green-400' : 'text-destructive'}`}>
-                          {pythonGeo.is_watertight ? '✓ Watertight' : '✕ Has Errors'}
-                        </p>
                       </div>
                       {pythonGeo.surface_area_mm2 && (
                         <div>
@@ -681,12 +675,6 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
                         <p className="text-primary font-mono">{stlData.boundingBox.width.toFixed(1)} × {stlData.boundingBox.height.toFixed(1)} × {stlData.boundingBox.depth.toFixed(1)} mm</p>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Mesh Quality</span>
-                        <p className={`font-mono ${!stlData.hasHoles ? 'text-green-400' : 'text-destructive'}`}>
-                          {!stlData.hasHoles ? '✓ Watertight' : '✕ Has Holes'}
-                        </p>
-                      </div>
-                      <div>
                         <span className="text-muted-foreground">Surface Area</span>
                         <p className="text-primary font-mono">{stlData.surfaceArea.toFixed(1)} mm²</p>
                       </div>
@@ -697,17 +685,17 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
                     </>
                   ) : null}
                   {pythonStatus === 'failed' && (
-                    <div className="col-span-2 text-muted-foreground italic text-[10px]">Geometry API offline</div>
+                    <div className="text-muted-foreground italic text-[10px]">Geometry API offline — using Three.js estimates</div>
                   )}
                 </div>
               </CollapsibleContent>
             </Collapsible>
           )}
 
-          {/* ─── Material Weight Calculator ─── */}
+          {/* Material Weight Calculator */}
           {(pythonGeo || stlData) && (
             <div className="space-y-1.5">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Material Weight Calculator</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Material Weights</p>
               <div className="space-y-1">
                 {MATERIALS.map((mat, idx) => {
                   const weight = getVolumeCm3() * mat.density;
@@ -715,7 +703,7 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
                   return (
                     <button key={mat.name}
                       onClick={() => setSelectedMaterial(idx)}
-                      className={`w-full flex items-center justify-between bg-[#0a0a0a] rounded px-3 py-1.5 border transition-all text-[11px] ${isActive ? 'border-primary/50 ring-1 ring-primary/30' : 'border-border/20 hover:border-border/40'}`}
+                      className={`w-full flex items-center justify-between bg-card rounded px-3 py-1.5 border transition-all text-[11px] ${isActive ? 'border-primary/50 ring-1 ring-primary/30' : 'border-border/20 hover:border-border/40'}`}
                     >
                       <span className="text-foreground">{mat.name}</span>
                       <span className="text-primary font-mono font-bold">{weight.toFixed(1)}g</span>
@@ -726,61 +714,256 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
             </div>
           )}
 
-          {/* ─── Geometry Zones Report ─── */}
+          {/* Software + Data Input */}
+          <Card className="glass-strong border-glow">
+            <CardHeader className="pb-2 pt-3 px-3">
+              <CardTitle className="text-[11px] uppercase tracking-wider text-muted-foreground">CAD Software</CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 pb-3 space-y-2">
+              <Select value={software} onValueChange={setSoftware}>
+                <SelectTrigger className="bg-background/50 border-border/50 h-8 text-xs">
+                  <SelectValue placeholder="Select software" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cadSoftware.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Textarea
+                value={structuredData}
+                onChange={e => setStructuredData(e.target.value)}
+                placeholder="Paste design data, JSON, or metadata…"
+                className="min-h-[60px] bg-background/50 border-border/50 font-mono text-[10px]"
+                rows={3}
+              />
+              <div className="grid grid-cols-2 gap-1.5">
+                <div onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 p-2 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 text-[10px]">
+                  <input ref={fileRef} type="file" accept={ACCEPTED_FILES} className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadedFile(f); }} />
+                  <Upload className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <span className="truncate">{uploadedFile ? uploadedFile.name : 'File'}</span>
+                </div>
+                <div onClick={() => imageRef.current?.click()} className="flex items-center gap-1.5 p-2 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 text-[10px]">
+                  <input ref={imageRef} type="file" accept={ACCEPTED_IMAGES} className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadedImage(f); }} />
+                  <Image className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <span className="truncate">{uploadedImage ? uploadedImage.name : 'Screenshot'}</span>
+                </div>
+              </div>
+              <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red h-9 text-xs">
+                {analyzing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> {analysisMessage}
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary/20">
+                      <div className="h-full bg-primary transition-all duration-500" style={{ width: `${analysisProgress}%` }} />
+                    </div>
+                  </>
+                ) : (
+                  <><Send className="w-3.5 h-3.5 mr-1.5" /> Analyze Design</>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* CENTER — 3D Viewer */}
+        <div className="lg:col-span-6 order-1 lg:order-2">
+          <div
+            className={`relative transition-all ${dragOver ? 'ring-2 ring-primary' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+          >
+            <CADViewer
+              fileUrl={modelUrl}
+              fileType={modelType}
+              loading={modelLoading}
+              className="h-[45vh] lg:h-[calc(100vh-10rem)]"
+              annotations={annotations}
+              selectedAnnotation={selectedAnnotation}
+              onSelectAnnotation={handleSelectAnnotation}
+              onSTLParsed={handleSTLParsed}
+              heatSensors={heatSensors}
+              heatMode={heatMode}
+              heatOpacity={heatOpacity / 100}
+              geometryZones={geometryZones}
+              showZones={showZones && !heatMode}
+              selectedZone={selectedZone}
+              onSelectZone={setSelectedZone}
+              onAnnotationResolve={handleResolveAnnotation}
+            />
+            {dragOver && (
+              <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center z-20">
+                <p className="text-primary font-semibold text-lg">Drop 3D file here</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT PANEL — Annotations + Details */}
+        <div className="lg:col-span-3 space-y-3 order-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
+
+          {/* Design Score */}
+          {designScore !== null && (
+            <div className={`rounded-lg p-3 ${getScoreStyle(designScore).bg} border border-border/30 animate-slide-up`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-2xl font-bold text-primary font-display">{designScore}</p>
+                  <p className="text-[10px] text-muted-foreground">Design Score</p>
+                </div>
+                <Badge className={`${getScoreStyle(designScore).badgeColor} text-foreground text-[10px]`}>
+                  {getScoreStyle(designScore).badge}
+                </Badge>
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                <div className="flex-1 bg-background/30 rounded px-1.5 py-1 text-center">
+                  <p className={`text-[10px] font-bold ${geoHealth === 'Good' ? 'text-green-400' : 'text-destructive'}`}>{geoHealth}</p>
+                  <p className="text-[8px] text-muted-foreground">Geo</p>
+                </div>
+                <div className="flex-1 bg-background/30 rounded px-1.5 py-1 text-center">
+                  <p className={`text-[10px] font-bold ${getScoreStyle(designScore).text}`}>{designScore >= 80 ? 'Good' : designScore >= 60 ? 'Fair' : 'Poor'}</p>
+                  <p className="text-[8px] text-muted-foreground">Struct</p>
+                </div>
+                <div className="flex-1 bg-background/30 rounded px-1.5 py-1 text-center">
+                  <p className="text-[10px] font-bold text-foreground">{unresolvedCount}</p>
+                  <p className="text-[8px] text-muted-foreground">Issues</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Slide-in Detail Panel for selected annotation */}
+          {detailAnnotation && (
+            <div className="rounded-xl border-2 animate-slide-up overflow-hidden" style={{ borderColor: `${detailAnnotation.color}55` }}>
+              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ backgroundColor: `${detailAnnotation.color}12`, borderColor: `${detailAnnotation.color}33` }}>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="flex items-center justify-center rounded-full font-black text-white shrink-0"
+                    style={{ backgroundColor: detailAnnotation.color, width: '28px', height: '28px', fontSize: '14px' }}
+                  >
+                    {detailAnnotation.id}
+                  </span>
+                  <div>
+                    <p className="font-bold text-base text-foreground">{detailAnnotation.title}</p>
+                    <Badge className={`text-[9px] mt-0.5 ${SEVERITY_STYLES[detailAnnotation.severity]?.bg} ${SEVERITY_STYLES[detailAnnotation.severity]?.text} border-0`}>
+                      {SEVERITY_STYLES[detailAnnotation.severity]?.icon} {detailAnnotation.severity}
+                    </Badge>
+                  </div>
+                </div>
+                <button onClick={() => { setDetailAnnotation(null); setSelectedAnnotation(null); }} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-4 py-3 space-y-3 bg-card">
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> Problem
+                  </p>
+                  <p className="text-sm text-foreground/85 leading-relaxed">{detailAnnotation.problem}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-green-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <Wrench className="w-3 h-3" /> Suggested Fix
+                  </p>
+                  <p className="text-sm text-foreground/85 leading-relaxed">{detailAnnotation.solution}</p>
+                </div>
+                {!detailAnnotation.resolved ? (
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs h-8"
+                    style={{ borderColor: `${detailAnnotation.color}44`, color: detailAnnotation.color }}
+                    onClick={() => handleResolveAnnotation(detailAnnotation.id)}
+                  >
+                    <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Mark as Resolved
+                  </Button>
+                ) : (
+                  <div className="w-full py-2 rounded-lg text-xs font-semibold text-center text-green-400 bg-green-500/10 border border-green-500/30">
+                    ✓ Resolved
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Annotation Cards List */}
+          {sortedAnnotations.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" /> Issues ({unresolvedCount}/{annotations.length})
+              </h4>
+              {sortedAnnotations.map(a => {
+                const style = SEVERITY_STYLES[a.severity] || SEVERITY_STYLES.LOW;
+                const isActive = selectedAnnotation === a.id;
+                return (
+                  <div
+                    key={a.id}
+                    className={`rounded-lg p-3 border-l-4 cursor-pointer transition-all hover:ring-1 hover:ring-primary/20 ${isActive ? 'ring-2 ring-primary' : ''} ${a.resolved ? 'opacity-50' : ''}`}
+                    style={{ borderLeftColor: a.color, backgroundColor: 'hsl(220 25% 6%)' }}
+                    onClick={() => handleSelectAnnotation(isActive ? null : a.id)}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span
+                        className="flex items-center justify-center rounded-full text-white shrink-0"
+                        style={{ backgroundColor: a.color, width: '20px', height: '20px', fontSize: '11px', fontWeight: 800 }}
+                      >
+                        {a.id}
+                      </span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
+                        {style.icon} {a.severity}
+                      </span>
+                      <span className="text-xs font-bold text-foreground flex-1 truncate">{a.title}</span>
+                      {a.resolved && <CheckCircle className="w-3.5 h-3.5 text-green-400 shrink-0" />}
+                    </div>
+                    <p className="text-[11px] text-foreground/60 line-clamp-2">{a.problem}</p>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleSelectAnnotation(a.id); }}
+                        className="text-[10px] text-primary flex items-center gap-1 hover:underline"
+                      >
+                        <Eye className="w-3 h-3" /> View on model
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Geometry Zones Report */}
           {sortedZones.length > 0 && (
             <Card className="glass-strong border-glow">
-              <CardHeader className="pb-2">
+              <CardHeader className="pb-1 pt-3 px-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Search className="w-4 h-4 text-primary" />
-                    <span className="uppercase tracking-wider text-muted-foreground">Geometry Inspection</span>
-                    <span className="text-xs font-normal text-muted-foreground">({sortedZones.length} zones)</span>
+                  <CardTitle className="text-[11px] flex items-center gap-1.5">
+                    <Search className="w-3.5 h-3.5 text-primary" />
+                    <span className="uppercase tracking-wider text-muted-foreground">Zones ({sortedZones.length})</span>
                   </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground">Show on 3D</span>
-                      <Switch checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
-                    </div>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setZonesExpanded(!zonesExpanded)}>
-                      {zonesExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <div className="flex items-center gap-1.5">
+                    <Switch checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
+                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setZonesExpanded(!zonesExpanded)}>
+                      {zonesExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     </Button>
                   </div>
                 </div>
               </CardHeader>
               {zonesExpanded && (
-                <CardContent className="space-y-2 pt-0">
+                <CardContent className="space-y-1.5 pt-0 px-3 pb-3">
                   {sortedZones.map((zone) => {
                     const style = SEVERITY_STYLES[zone.severity] || SEVERITY_STYLES.LOW;
-                    const typeLabel = ZONE_CONFIG[zone.type]?.label || zone.type;
                     const isActive = selectedZone === zone.id;
                     return (
                       <div
                         key={zone.id}
                         onClick={() => { setSelectedZone(isActive ? null : zone.id); setShowZones(true); }}
-                        className={`rounded-lg border p-3 cursor-pointer transition-all hover:ring-1 hover:ring-primary/30 ${style.bg} ${style.border} ${isActive ? 'ring-2 ring-primary' : ''}`}
+                        className={`rounded-lg border p-2.5 cursor-pointer transition-all hover:ring-1 hover:ring-primary/30 ${style.bg} ${style.border} ${isActive ? 'ring-2 ring-primary' : ''}`}
                       >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: zone.color }} />
-                            <span className="text-xs font-bold text-foreground">{zone.label}</span>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: zone.color }} />
+                            <span className="text-[11px] font-bold text-foreground truncate">{zone.label}</span>
                           </div>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
+                          <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${style.bg} ${style.text}`}>
                             {zone.severity}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-background/50 border border-border/30 text-muted-foreground">
-                            {typeLabel}
-                          </span>
-                          {zone.affectedTriangles > 0 && (
-                            <span className="text-[10px] text-muted-foreground">{zone.affectedTriangles} faces</span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-foreground/70 mb-1.5">{zone.explanation}</p>
-                        <div className="flex items-start gap-1.5 bg-background/30 rounded px-2 py-1.5 border border-border/20">
-                          <Lightbulb className="w-3 h-3 text-primary shrink-0 mt-0.5" />
-                          <p className="text-[11px] text-foreground/80">{zone.suggestion}</p>
-                        </div>
+                        <p className="text-[10px] text-foreground/60 line-clamp-2">{zone.explanation}</p>
                       </div>
                     );
                   })}
@@ -789,20 +972,52 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
             </Card>
           )}
 
-          <p className="text-[10px] text-muted-foreground/50 text-center">
-            3D visualization is for reference only. Critical zone highlighting is based on geometry analysis of provided data.
-          </p>
+          {/* Export guide */}
+          {guide && (
+            <Card className="glass border-glow animate-slide-up">
+              <CardHeader className="pb-2 pt-3 px-3">
+                <CardTitle className="text-[11px] flex items-center gap-1.5">
+                  <Lightbulb className="w-3.5 h-3.5 text-primary" />
+                  <span className="uppercase tracking-wider text-muted-foreground">Export Guide</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-3 pb-3 space-y-2">
+                {guide.steps.map((step, i) => (
+                  <div key={i} className="flex items-start gap-2 text-[11px]">
+                    <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                    <span className="text-foreground/80">{step}</span>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted-foreground">Formats: <span className="text-primary">{guide.formats}</span></p>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Heat Analysis Results */}
+          {/* Analysis Results */}
+          {result && displayContent && (
+            <div className="space-y-2 animate-slide-up">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                <h3 className="text-sm font-bold font-display tracking-wide">Analysis Report</h3>
+              </div>
+              <Card className="glass-strong border-glow">
+                <CardContent className="pt-4 pb-4 px-3 prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown>{displayContent}</ReactMarkdown>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Heat Analysis */}
           {heatMode && (heatAnalyzing || heatAnalysis) && (
             <Card className="glass-strong border-glow">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Thermometer className="w-4 h-4 text-destructive" />
+              <CardHeader className="pb-2 pt-3 px-3">
+                <CardTitle className="text-[11px] flex items-center gap-1.5">
+                  <Thermometer className="w-3.5 h-3.5 text-destructive" />
                   <span className="uppercase tracking-wider text-muted-foreground">Thermal Analysis</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="prose prose-sm prose-invert max-w-none">
+              <CardContent className="prose prose-sm prose-invert max-w-none px-3 pb-3">
                 {heatAnalyzing && !heatAnalysis && (
                   <div className="flex items-center gap-2 text-muted-foreground py-4">
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -814,183 +1029,11 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
             </Card>
           )}
         </div>
-
-        {/* RIGHT — Controls + Results */}
-        <div className="space-y-4">
-          {/* Software selector */}
-          <Card className="glass-strong border-glow">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Select CAD Software</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Select value={software} onValueChange={setSoftware}>
-                <SelectTrigger className="bg-background/50 border-border/50">
-                  <SelectValue placeholder="Select the software used" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cadSoftware.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
-
-          {/* Export guide */}
-          {guide && (
-            <Card className="glass border-glow animate-slide-up">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-primary" />
-                  <span className="uppercase tracking-wider text-muted-foreground">Export Guide — {software}</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  {guide.steps.map((step, i) => (
-                    <div key={i} className="flex items-start gap-3 text-sm">
-                      <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
-                      <span className="text-foreground/80">{step}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
-                  <ChevronRight className="w-3 h-3" />
-                  Supported: <span className="text-primary font-medium">{guide.formats}</span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Data input */}
-          <Card className="glass-strong border-glow">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Design Data Input</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Textarea
-                value={structuredData}
-                onChange={e => setStructuredData(e.target.value)}
-                placeholder="Paste structured data, JSON, STEP metadata, or exported design parameters…"
-                className="min-h-[100px] bg-background/50 border-border/50 font-mono text-xs"
-                rows={5}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <div onClick={() => fileRef.current?.click()} className="flex items-center gap-2 p-3 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group">
-                  <input ref={fileRef} type="file" accept={ACCEPTED_FILES} className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadedFile(f); }} />
-                  <Upload className="w-4 h-4 text-muted-foreground group-hover:text-primary shrink-0" />
-                  <div className="min-w-0"><p className="text-xs font-medium truncate">{uploadedFile ? uploadedFile.name : 'Upload File'}</p></div>
-                </div>
-                <div onClick={() => imageRef.current?.click()} className="flex items-center gap-2 p-3 rounded-lg bg-background/30 border border-dashed border-border/50 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all group">
-                  <input ref={imageRef} type="file" accept={ACCEPTED_IMAGES} className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setUploadedImage(f); }} />
-                  <Image className="w-4 h-4 text-muted-foreground group-hover:text-primary shrink-0" />
-                  <div className="min-w-0"><p className="text-xs font-medium truncate">{uploadedImage ? uploadedImage.name : 'Screenshot'}</p></div>
-                </div>
-              </div>
-              <Button onClick={handleAnalyze} disabled={analyzing} className="w-full glow-red">
-                {analyzing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" /> {analysisMessage}
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary/20">
-                      <div className="h-full bg-primary transition-all duration-500" style={{ width: `${analysisProgress}%` }} />
-                    </div>
-                  </>
-                ) : (
-                  <><Send className="w-4 h-4 mr-2" /> Submit for Analysis</>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* ─── Design Score Card ─── */}
-          {designScore !== null && (
-            <div className={`rounded-lg p-4 ${getScoreStyle(designScore).bg} border border-[#222222] animate-slide-up`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-3xl font-bold text-primary font-display">{designScore}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Design Score</p>
-                </div>
-                <Badge className={`${getScoreStyle(designScore).badgeColor} text-foreground`}>
-                  {getScoreStyle(designScore).badge}
-                </Badge>
-              </div>
-              <div className="flex gap-2 mt-3">
-                <div className={`flex-1 bg-background/30 rounded px-2 py-1 text-center`}>
-                  <p className={`text-[10px] font-bold ${geoHealth === 'Good' ? 'text-green-400' : 'text-destructive'}`}>{geoHealth}</p>
-                  <p className="text-[9px] text-muted-foreground">Geometry</p>
-                </div>
-                <div className="flex-1 bg-background/30 rounded px-2 py-1 text-center">
-                  <p className={`text-[10px] font-bold ${getScoreStyle(designScore).text}`}>{designScore >= 80 ? 'Good' : designScore >= 60 ? 'Fair' : 'Poor'}</p>
-                  <p className="text-[9px] text-muted-foreground">Structural</p>
-                </div>
-                <div className="flex-1 bg-background/30 rounded px-2 py-1 text-center">
-                  <p className={`text-[10px] font-bold ${stlData && Math.min(stlData.boundingBox.width, stlData.boundingBox.height, stlData.boundingBox.depth) < 1.5 ? 'text-destructive' : 'text-green-400'}`}>
-                    {stlData && Math.min(stlData.boundingBox.width, stlData.boundingBox.height, stlData.boundingBox.depth) < 1.5 ? 'Warning' : 'Ready'}
-                  </p>
-                  <p className="text-[9px] text-muted-foreground">Mfg Ready</p>
-                </div>
-                <div className="flex-1 bg-background/30 rounded px-2 py-1 text-center">
-                  <p className="text-[10px] font-bold text-foreground">{(getVolumeCm3() * MATERIALS[selectedMaterial].density).toFixed(0)}g</p>
-                  <p className="text-[9px] text-muted-foreground">Weight</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Analysis Results */}
-          {result && displayContent && (
-            <div className="space-y-3 animate-slide-up">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
-                <h3 className="text-base font-bold font-display tracking-wide">Analysis Results</h3>
-              </div>
-              <Card className="glass-strong border-glow">
-                <CardContent className="pt-5 prose prose-sm prose-invert max-w-none">
-                  <ReactMarkdown>{displayContent}</ReactMarkdown>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {/* ─── Annotation Cards (never raw JSON) ─── */}
-          {sortedAnnotations.length > 0 && (
-            <div className="space-y-2 animate-slide-up">
-              <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" /> Critical Issues Found ({sortedAnnotations.length})
-              </h4>
-              {sortedAnnotations.map(a => {
-                const severityBg = a.severity === 'CRITICAL' ? 'bg-destructive/20' : a.severity === 'HIGH' ? 'bg-orange-500/20' : a.severity === 'MEDIUM' ? 'bg-yellow-500/20' : 'bg-muted/20';
-                return (
-                  <div key={a.id} className="bg-[#0a0a0a] rounded-lg p-3 border-l-4 cursor-pointer hover:ring-1 hover:ring-primary/20 transition-all"
-                    style={{ borderLeftColor: a.color }}
-                    onClick={() => setSelectedAnnotation(selectedAnnotation === a.id ? null : a.id)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-foreground ${severityBg}`}>
-                        {a.severity}
-                      </span>
-                      <span className="text-xs font-bold text-foreground">{a.title}</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      <div>
-                        <span className="text-[9px] text-muted-foreground uppercase">Problem:</span>
-                        <p className="text-[11px] text-foreground/80">{a.problem}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-green-400 uppercase">Solution:</span>
-                        <p className="text-[11px] text-foreground">{a.solution}</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Disclaimer */}
       <p className="text-[10px] text-muted-foreground/40 text-center max-w-xl mx-auto">
-        Lumexa CAD Analysis is AI-powered interpretation of your design data and 3D geometry.
-        Heat visualization based on real sensor data mapped to component geometry. Not a substitute for certified FEA simulation software or CFD analysis.
+        Lumexa CAD Analysis uses AI-powered interpretation. Annotations are placed via position hints on the 3D bounding box. Not a substitute for certified FEA simulation.
       </p>
 
       {/* Heat Stress Modal */}
@@ -1010,29 +1053,20 @@ Valid position_hints: far_end_top, far_end_bottom, middle_center, near_end_top, 
               </Button>
             </div>
             <Button variant="outline" className="w-full gap-2 justify-start" onClick={handleHeatUseLast}>
-              <Box className="w-4 h-4" /> Use Last Telemetry Data
+              <Thermometer className="w-4 h-4" /> Use Last Telemetry Session
             </Button>
-            <Button variant="ghost" className="w-full" onClick={() => setHeatModalOpen(false)}>Cancel</Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* No Temperature Data Modal */}
+      {/* No temperature columns dialog */}
       <Dialog open={heatNoTempOpen} onOpenChange={setHeatNoTempOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-warning" /> No Temperature Data
-            </DialogTitle>
-            <DialogDescription>Heat Stress visualization requires temperature sensor data in your telemetry. No temperature column was detected.</DialogDescription>
+            <DialogTitle>No Temperature Data Found</DialogTitle>
+            <DialogDescription>The uploaded file doesn't contain any temperature columns (e.g. "temp", "temperature", "°C").</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 pt-2">
-            <p className="text-xs text-muted-foreground">Please include sensors like: temperature_c, temp, T_motor, thermal_reading, heat_sensor</p>
-            <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setHeatNoTempOpen(false)}>Close</Button>
-              <Button variant="outline" className="flex-1" onClick={() => { setHeatNoTempOpen(false); setHeatModalOpen(true); }}>Upload New Data</Button>
-            </div>
-          </div>
+          <Button onClick={() => setHeatNoTempOpen(false)}>OK</Button>
         </DialogContent>
       </Dialog>
     </div>
