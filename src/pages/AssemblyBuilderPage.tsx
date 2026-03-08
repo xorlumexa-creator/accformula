@@ -507,6 +507,12 @@ function AssemblyScene({ parts, viewMode, selectedId, isolatedId, hoveredId, tra
           onSelect={onSelect} onHover={onHover} onUnhover={onUnhover} onTransformChange={onTransformChange} />
       ))}
 
+      {/* Rotation ring around selected part */}
+      {selectedId && (() => {
+        const sp = parts.find(p => p.id === selectedId);
+        return sp ? <RotationRing part={sp} /> : null;
+      })()}
+
       <AnnotationSpheres annotations={annotations} parts={parts} visible={showAnnotations} />
 
       <Grid infiniteGrid cellSize={0.5} sectionSize={2} cellColor="#1a0000" sectionColor="#330000" fadeDistance={50} position={[0, -0.01, 0]} />
@@ -677,6 +683,56 @@ export default function AssemblyBuilderPage() {
       rot[axis] += delta;
       return { ...p, rotation: rot };
     }));
+  };
+
+  // Smooth animated rotation over 400ms
+  const animRotRef = useRef<number | null>(null);
+  const animateRotationTo = useCallback((targetRot: [number, number, number]) => {
+    if (!selectedPart) return;
+    if (animRotRef.current) cancelAnimationFrame(animRotRef.current);
+    const part = parts.find(p => p.id === selectedPart);
+    if (!part) return;
+    const startRot = [...part.rotation] as [number, number, number];
+    const startTime = performance.now();
+    const duration = 400;
+    const animate = (now: number) => {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+      const current: [number, number, number] = [
+        startRot[0] + (targetRot[0] - startRot[0]) * ease,
+        startRot[1] + (targetRot[1] - startRot[1]) * ease,
+        startRot[2] + (targetRot[2] - startRot[2]) * ease,
+      ];
+      setParts(prev => prev.map(p => p.id === selectedPart ? { ...p, rotation: current } : p));
+      if (t < 1) animRotRef.current = requestAnimationFrame(animate);
+      else animRotRef.current = null;
+    };
+    animRotRef.current = requestAnimationFrame(animate);
+  }, [selectedPart, parts]);
+
+  const layFlat = () => {
+    if (!selectedPart) return;
+    const part = parts.find(p => p.id === selectedPart);
+    if (!part) return;
+    animateRotationTo([90, part.rotation[1], part.rotation[2]]);
+  };
+  const standUpright = () => {
+    if (!selectedPart) return;
+    const part = parts.find(p => p.id === selectedPart);
+    if (!part) return;
+    animateRotationTo([0, part.rotation[1], 0]);
+  };
+  const flip180 = () => {
+    if (!selectedPart) return;
+    const part = parts.find(p => p.id === selectedPart);
+    if (!part) return;
+    animateRotationTo([part.rotation[0] + 180, part.rotation[1], part.rotation[2]]);
+  };
+  const resetRotation = () => {
+    if (!selectedPart) return;
+    const part = parts.find(p => p.id === selectedPart);
+    if (!part) return;
+    animateRotationTo([...part.originalRotation]);
   };
 
   const getDims = (p: AssemblyPart) => p.geometry?.dimensions_mm || p.estimatedDims || { x: 0, y: 0, z: 0 };
@@ -1071,6 +1127,28 @@ Reference actual part names and real dimensions throughout. Give specific measur
                 <div className="ml-auto flex items-center gap-1.5">
                   <Switch checked={snapToGrid} onCheckedChange={setSnapToGrid} className="scale-75" />
                   <span className={`text-[9px] ${snapToGrid ? 'text-primary' : 'text-muted-foreground'}`}>Snap 5mm</span>
+                </div>
+              </div>
+              {/* Orientation quick buttons */}
+              <div className="border-t border-[#333] pt-2 mt-1">
+                <p className="text-[9px] text-muted-foreground mb-1.5">Quick Orientation</p>
+                <div className="grid grid-cols-4 gap-1">
+                  <Button size="sm" variant="secondary" className="h-7 text-[8px] px-1 gap-0.5 flex-col leading-none py-0.5" onClick={layFlat}>
+                    <ArrowDownToLine className="w-3 h-3 text-primary" />
+                    Lay Flat
+                  </Button>
+                  <Button size="sm" variant="secondary" className="h-7 text-[8px] px-1 gap-0.5 flex-col leading-none py-0.5" onClick={standUpright}>
+                    <ArrowUpFromLine className="w-3 h-3 text-primary" />
+                    Upright
+                  </Button>
+                  <Button size="sm" variant="secondary" className="h-7 text-[8px] px-1 gap-0.5 flex-col leading-none py-0.5" onClick={flip180}>
+                    <FlipVertical className="w-3 h-3 text-primary" />
+                    Flip 180
+                  </Button>
+                  <Button size="sm" variant="secondary" className="h-7 text-[8px] px-1 gap-0.5 flex-col leading-none py-0.5" onClick={resetRotation}>
+                    <Undo2 className="w-3 h-3 text-primary" />
+                    Reset
+                  </Button>
                 </div>
               </div>
             </div>
