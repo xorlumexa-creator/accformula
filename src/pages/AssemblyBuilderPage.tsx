@@ -289,17 +289,6 @@ function AnnotationSpheres({ annotations, parts, visible }: {
 
   if (!bbox) return null;
 
-  const bbox = useMemo(() => {
-    const box = new THREE.Box3();
-    parts.forEach(p => {
-      const dims = p.geometry?.dimensions_mm || p.estimatedDims || { x: 10, y: 10, z: 10 };
-      const halfX = dims.x / 2, halfY = dims.y / 2, halfZ = dims.z / 2;
-      const pos = p.position;
-      box.expandByPoint(new THREE.Vector3(pos[0] - halfX, pos[1] - halfY, pos[2] - halfZ));
-      box.expandByPoint(new THREE.Vector3(pos[0] + halfX, pos[1] + halfY, pos[2] + halfZ));
-    });
-    return box;
-  }, [parts]);
 
   const maxDim = Math.max(bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z);
   const sphereSize = maxDim * 0.03;
