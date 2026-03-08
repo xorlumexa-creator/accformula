@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Upload, BarChart3, MessageSquare, Timer, LogOut, FileInput, Radio, Microscope, Box } from 'lucide-react';
+import { LayoutDashboard, Upload, BarChart3, MessageSquare, Timer, LogOut, FileInput, Radio, Microscope, Search } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import lumexaLogo from '@/assets/lumexa-logo.jpeg';
