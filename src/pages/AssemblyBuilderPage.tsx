@@ -47,6 +47,7 @@ interface AssemblyPart {
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
+  originalRotation: [number, number, number];
   geometry?: PartGeometry;
   geometrySource: 'python' | 'estimated';
   estimatedDims?: { x: number; y: number; z: number };
