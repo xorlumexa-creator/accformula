@@ -19,6 +19,7 @@ import {
   Loader2, Zap, Save, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   RotateCw, ChevronUp, ChevronDown, Crosshair, Star, Download,
   Link2, Scale, Shield, Wrench, AlertTriangle, Move, Minimize2,
+  ArrowDownToLine, ArrowUpFromLine, FlipVertical, Undo2,
 } from 'lucide-react';
 
 const PYTHON_API = 'https://python-1--epicure742.replit.app/analyze-part';
@@ -583,6 +584,7 @@ export default function AssemblyBuilderPage() {
       visible: true,
       position: [parts.length * 3, 0, 0],
       rotation: [0, 0, 0],
+      originalRotation: [0, 0, 0],
       scale: [1, 1, 1],
       geometrySource: 'estimated',
     };
