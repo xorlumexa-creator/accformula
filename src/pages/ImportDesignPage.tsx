@@ -544,9 +544,9 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
         designScore: Math.max(0, score),
         annotationsArray: parsedAnnotations,
         analysisText: fullText,
-        geometryData: pg || null,
+        geometryData: pythonGeo || null,
         severityCards: parsedAnnotations.map(a => ({ severity: a.severity, title: a.title, description: a.problem })),
-        dimensions: dims2,
+        dimensions: savedDims,
       });
       sonnerToast.success(`Analysis saved as "${partName.trim()}"`);
     } catch (err: any) {
