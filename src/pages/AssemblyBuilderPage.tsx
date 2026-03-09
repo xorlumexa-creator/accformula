@@ -366,7 +366,7 @@ export default function AssemblyBuilderPage() {
     const massAl = (vol * 0.0000027).toFixed(3);
     const massCF = (vol * 0.0000016).toFixed(3);
 
-    const prompt = `You are Lumexa Engineering AI performing a complete assembly quality inspection.
+    const prompt = `You are Dynaxor Engineering AI performing a complete assembly quality inspection.
 
 USER PROJECT CONTEXT:
 Project: ${projectContext?.name || 'Not specified'}
