@@ -364,6 +364,10 @@ export default function ImportDesignPage() {
 
   // ─── Main Analysis ───
   const handleAnalyze = async () => {
+    if (!partName.trim()) {
+      toast({ title: 'Please name this part before analyzing', variant: 'destructive' });
+      return;
+    }
     if (!structuredData.trim() && !uploadedFile) {
       toast({ title: 'Please provide design data or upload a file', variant: 'destructive' });
       return;
@@ -530,6 +534,22 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
       setDesignScore(Math.max(0, score));
 
       setResult({ content: fullText, annotations: parsedAnnotations });
+
+      // Auto-save to localStorage
+      const pg = pythonGeo;
+      const dims2 = pg ? pg.dimensions_mm : stlData ? { x: stlData.boundingBox.width, y: stlData.boundingBox.height, z: stlData.boundingBox.depth } : undefined;
+      saveAnalysis({
+        partName: partName.trim(),
+        filename: uploadedFileName || 'unknown',
+        timestamp: new Date().toISOString(),
+        designScore: Math.max(0, score),
+        annotationsArray: parsedAnnotations,
+        analysisText: fullText,
+        geometryData: pg || null,
+        severityCards: parsedAnnotations.map(a => ({ severity: a.severity, title: a.title, description: a.problem })),
+        dimensions: dims2,
+      });
+      sonnerToast.success(`Analysis saved as "${partName.trim()}"`);
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
