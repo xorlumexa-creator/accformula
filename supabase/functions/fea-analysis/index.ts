@@ -13,7 +13,7 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    const systemPrompt = `You are an advanced FEA (Finite Element Analysis) interpretation engine inside the Lumexa platform.
+    const systemPrompt = `You are an advanced FEA (Finite Element Analysis) interpretation engine inside the Dynaxor platform.
 
 Your role is to analyze FEA simulation results and provide professional engineering interpretation.
 

@@ -13,7 +13,7 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    let systemPrompt = `You are an advanced engineering intelligence system inside the Lumexa platform.
+    let systemPrompt = `You are an advanced engineering intelligence system inside the Dynaxor platform.
 
 Your role is to analyze structured engineering design data, telemetry, sensor data, and project context to provide professional technical insights.
 
