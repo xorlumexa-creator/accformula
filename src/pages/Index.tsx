@@ -2,13 +2,17 @@ import { useEffect, useState } from 'react';
 import { useTelemetry } from '@/context/TelemetryContext';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import { useTelemetryAttempts, useDesignAnalyses, type TelemetryAttempt, type DesignAnalysis } from '@/hooks/useLocalStorage';
 import MetricCard from '@/components/MetricCard';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Gauge, Zap, Thermometer, Clock, Database, Activity,
-  Upload, FileInput, MessageSquare, Timer, Search
+  Upload, FileInput, MessageSquare, Timer, Search, BarChart3, Eye, X
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ReactMarkdown from 'react-markdown';
 
 const navCards = [
   { to: '/upload', icon: Upload, label: 'Sensor Telemetry', desc: 'Import CSV / telemetry files' },
@@ -23,8 +27,14 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [hasProject, setHasProject] = useState<boolean | null>(null);
+  const { attempts } = useTelemetryAttempts();
+  const { analyses } = useDesignAnalyses();
+  const [telPage, setTelPage] = useState(0);
+  const [viewAttempt, setViewAttempt] = useState<TelemetryAttempt | null>(null);
+  const [viewDesign, setViewDesign] = useState<DesignAnalysis | null>(null);
 
-  // Check onboarding
+  const PER_PAGE = 10;
+
   useEffect(() => {
     if (!user) return;
     supabase.from('projects').select('id').eq('user_id', user.id).limit(1)
@@ -41,16 +51,23 @@ export default function DashboardPage() {
     return <div className="flex items-center justify-center min-h-[60vh] text-muted-foreground">Loading...</div>;
   }
 
-  // Get first two numeric columns for chart preview
-  const numericCols = stats?.numericColumns || [];
-  const chartData = data.slice(0, 200);
-  const xCol = numericCols[0];
-  const yCol = numericCols.length > 1 ? numericCols[1] : numericCols[0];
+  const sortedAttempts = [...attempts].reverse();
+  const pagedAttempts = sortedAttempts.slice(telPage * PER_PAGE, (telPage + 1) * PER_PAGE);
+  const totalTelPages = Math.ceil(sortedAttempts.length / PER_PAGE);
+
+  const sortedDesigns = [...analyses].reverse();
+
+  const getScoreColor = (s: number) => {
+    if (s >= 90) return 'bg-green-600';
+    if (s >= 80) return 'bg-yellow-600';
+    if (s >= 60) return 'bg-orange-600';
+    return 'bg-destructive';
+  };
 
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Navigation Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {navCards.map(({ to, icon: Icon, label, desc }) => (
           <Link key={to} to={to}
             className="gradient-card rounded-lg border border-border p-4 hover:border-primary/30 hover:glow-red transition-all group cursor-pointer">
@@ -61,98 +78,187 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Past Sessions */}
-      {sessions.length > 0 && !stats && (
-        <div className="gradient-card rounded-lg border border-border p-4 space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Recent Telemetry Sessions</h3>
-          <div className="space-y-2">
-            {sessions.slice(0, 5).map(s => (
-              <button key={s.id} onClick={() => loadSession(s.id)}
-                className="w-full flex items-center justify-between p-3 rounded-lg bg-background/50 hover:bg-primary/5 hover:border-primary/20 border border-border/50 transition-all text-left">
-                <div>
-                  <p className="text-sm font-medium">{s.file_name}</p>
-                  <p className="text-xs text-muted-foreground">{s.row_count} rows · {(s.columns as string[]).length} columns</p>
+      {/* TELEMETRY ATTEMPTS SECTION */}
+      {sortedAttempts.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-bold text-primary font-display tracking-wide flex items-center gap-2">
+            <BarChart3 className="w-5 h-5" /> Telemetry Attempts
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {pagedAttempts.map(a => (
+              <div key={a.attemptNumber} className="rounded-lg border border-border/30 p-4" style={{ background: '#111111' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-primary font-bold font-display text-sm">Attempt {a.attemptNumber}</span>
+                  <span className="text-xs text-muted-foreground">{new Date(a.timestamp).toLocaleString()}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleDateString()}</p>
-              </button>
+                <p className="text-xs text-muted-foreground italic truncate mb-3">
+                  {a.rawData.slice(0, 50)}...
+                </p>
+                <button
+                  onClick={() => setViewAttempt(a)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30 transition-colors font-medium"
+                >
+                  Analytics
+                </button>
+              </div>
+            ))}
+          </div>
+          {/* Pagination */}
+          {totalTelPages > 1 && (
+            <div className="flex items-center justify-center gap-2">
+              {Array.from({ length: totalTelPages }, (_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setTelPage(i)}
+                  className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${i === telPage ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:bg-secondary/80'}`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* DESIGN ANALYSES SECTION */}
+      {sortedDesigns.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-bold text-primary font-display tracking-wide flex items-center gap-2">
+            <FileInput className="w-5 h-5" /> Part Analyses
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {sortedDesigns.map((d, i) => (
+              <div key={i} className="rounded-lg border border-border/30 p-4" style={{ background: '#111111' }}>
+                <p className="text-primary font-bold text-lg mb-1">{d.partName}</p>
+                <p className="text-xs text-muted-foreground mb-1">{d.filename}</p>
+                <p className="text-xs text-muted-foreground mb-3">{new Date(d.timestamp).toLocaleDateString()}</p>
+                <div className="flex items-center justify-between">
+                  <Badge className={`${getScoreColor(d.designScore)} text-foreground text-xs`}>
+                    Score: {d.designScore}
+                  </Badge>
+                  <button
+                    onClick={() => setViewDesign(d)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors font-medium"
+                  >
+                    View Analysis
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {!stats && sessions.length === 0 && (
+      {/* Empty state */}
+      {sortedAttempts.length === 0 && sortedDesigns.length === 0 && (
         <div className="flex flex-col items-center justify-center min-h-[40vh] text-center gap-6">
           <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Activity className="w-10 h-10 text-primary animate-pulse-glow" />
+            <Activity className="w-10 h-10 text-primary animate-pulse" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold mb-2">No Telemetry Data</h2>
+            <h2 className="text-2xl font-bold mb-2">Welcome to Dynaxor</h2>
             <p className="text-muted-foreground max-w-md">
-              Upload a CSV file with your sensor data to see live metrics, charts, and analysis.
+              Upload telemetry data or import a 3D design to get started with AI-powered engineering analysis.
             </p>
           </div>
-          <Link to="/upload"
-            className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-6 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors">
-            Upload Data
-          </Link>
+          <div className="flex gap-3">
+            <Link to="/upload" className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-6 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors">
+              Upload Telemetry
+            </Link>
+            <Link to="/import-design" className="inline-flex items-center gap-2 border border-primary/30 text-primary px-6 py-2.5 rounded-lg font-medium hover:bg-primary/10 transition-colors">
+              Insert Design
+            </Link>
+          </div>
         </div>
       )}
 
-      {stats && (
-        <>
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold">Dashboard</h2>
-              <p className="text-sm text-muted-foreground">{fileName} · {stats.rowCount} rows · {stats.numericColumns.length} metrics</p>
-            </div>
-          </div>
-
-          {/* Dynamic Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {numericCols.slice(0, 8).map((col, i) => {
-              const s = stats.summary[col];
-              const icons = [Gauge, Zap, Thermometer, Clock, Database, Activity, Gauge, Zap];
-              const variants: ('primary' | 'accent' | 'success' | 'default')[] = ['primary', 'accent', 'success', 'default'];
-              return (
-                <MetricCard
-                  key={col}
-                  label={`${col}${s.unit ? ` (${s.unit})` : ''}`}
-                  value={s.max.toFixed(2)}
-                  unit={s.unit || ''}
-                  icon={icons[i % icons.length]}
-                  variant={variants[i % variants.length]}
-                />
-              );
-            })}
-          </div>
-
-          {/* Chart */}
-          {xCol && yCol && (
-            <div className="gradient-card rounded-lg border border-border p-4">
-              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
-                {yCol} over {xCol}
-              </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(0, 85%, 55%)" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="hsl(0, 85%, 55%)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 15%, 18%)" />
-                    <XAxis dataKey={xCol} stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
-                    <YAxis stroke="hsl(220, 10%, 40%)" tick={{ fontSize: 11 }} />
-                    <Tooltip contentStyle={{ background: 'hsl(220, 18%, 12%)', border: '1px solid hsl(220, 15%, 20%)', borderRadius: 8, fontSize: 12 }} />
-                    <Area type="monotone" dataKey={yCol} stroke="hsl(0, 85%, 55%)" fill="url(#chartGrad)" strokeWidth={2} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+      {/* Telemetry Attempt Modal */}
+      <Dialog open={!!viewAttempt} onOpenChange={() => setViewAttempt(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-primary font-display">
+              <BarChart3 className="w-5 h-5" />
+              Attempt {viewAttempt?.attemptNumber} — {viewAttempt && new Date(viewAttempt.timestamp).toLocaleString()}
+            </DialogTitle>
+          </DialogHeader>
+          {viewAttempt && (
+            <div className="space-y-4">
+              {viewAttempt.severityCards.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Issues Found</h4>
+                  {viewAttempt.severityCards.map((c, i) => (
+                    <div key={i} className="rounded-lg border border-border/30 p-3" style={{ background: '#111111' }}>
+                      <Badge className={`text-xs mb-1 ${c.severity === 'CRITICAL' ? 'bg-destructive' : c.severity === 'HIGH' ? 'bg-orange-600' : c.severity === 'MEDIUM' ? 'bg-yellow-600' : 'bg-muted'}`}>
+                        {c.severity}
+                      </Badge>
+                      <p className="text-sm font-bold">{c.title}</p>
+                      <p className="text-xs text-muted-foreground">{c.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {viewAttempt.analysisText && (
+                <div className="prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown>{viewAttempt.analysisText}</ReactMarkdown>
+                </div>
+              )}
             </div>
           )}
-        </>
-      )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Design Analysis Modal */}
+      <Dialog open={!!viewDesign} onOpenChange={() => setViewDesign(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-primary font-display">
+              <FileInput className="w-5 h-5" />
+              {viewDesign?.partName} — Score: {viewDesign?.designScore}
+            </DialogTitle>
+          </DialogHeader>
+          {viewDesign && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <p className="text-muted-foreground text-xs">Filename</p>
+                  <p className="font-mono text-xs">{viewDesign.filename}</p>
+                </div>
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <p className="text-muted-foreground text-xs">Date</p>
+                  <p className="text-xs">{new Date(viewDesign.timestamp).toLocaleString()}</p>
+                </div>
+                {viewDesign.dimensions && (
+                  <div className="rounded-lg bg-secondary/50 p-3 col-span-2">
+                    <p className="text-muted-foreground text-xs">Dimensions</p>
+                    <p className="font-mono text-xs text-primary">
+                      {viewDesign.dimensions.x.toFixed(1)} × {viewDesign.dimensions.y.toFixed(1)} × {viewDesign.dimensions.z.toFixed(1)} mm
+                    </p>
+                  </div>
+                )}
+              </div>
+              {viewDesign.severityCards.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Annotations</h4>
+                  {viewDesign.severityCards.map((c, i) => (
+                    <div key={i} className="rounded-lg border border-border/30 p-3" style={{ background: '#111111' }}>
+                      <Badge className={`text-xs mb-1 ${c.severity === 'CRITICAL' ? 'bg-destructive' : c.severity === 'HIGH' ? 'bg-orange-600' : c.severity === 'MEDIUM' ? 'bg-yellow-600' : 'bg-muted'}`}>
+                        {c.severity}
+                      </Badge>
+                      <p className="text-sm font-bold">{c.title}</p>
+                      <p className="text-xs text-muted-foreground">{c.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {viewDesign.analysisText && (
+                <div className="prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown>{viewDesign.analysisText.replace(/```annotations-json[\s\S]*?```/g, '').trim()}</ReactMarkdown>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

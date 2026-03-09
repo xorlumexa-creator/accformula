@@ -19,7 +19,10 @@ import {
   X, Eye, Target, Wrench,
 } from 'lucide-react';
 import CADViewer, { type Annotation, type STLData, type HeatSensor, type GeometryZone, ZONE_CONFIG } from '@/components/CADViewer';
+import CADFixInstructions from '@/components/CADFixInstructions';
 import { useTelemetry } from '@/context/TelemetryContext';
+import { useDesignAnalyses } from '@/hooks/useLocalStorage';
+import { toast as sonnerToast } from 'sonner';
 import Papa from 'papaparse';
 
 const PYTHON_API = 'https://1d1141ef-3925-4e14-84d3-439cca800d44-00-38kio9wyr2lpc.sisko.replit.dev:8000/analyze-part';
@@ -91,6 +94,10 @@ export default function ImportDesignPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const telemetry = useTelemetry();
+  const { saveAnalysis } = useDesignAnalyses();
+
+  // Part name
+  const [partName, setPartName] = useState('');
 
   // Core state
   const [software, setSoftware] = useState('');
@@ -358,6 +365,10 @@ export default function ImportDesignPage() {
 
   // ─── Main Analysis ───
   const handleAnalyze = async () => {
+    if (!partName.trim()) {
+      toast({ title: 'Please name this part before analyzing', variant: 'destructive' });
+      return;
+    }
     if (!structuredData.trim() && !uploadedFile) {
       toast({ title: 'Please provide design data or upload a file', variant: 'destructive' });
       return;
@@ -524,6 +535,21 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
       setDesignScore(Math.max(0, score));
 
       setResult({ content: fullText, annotations: parsedAnnotations });
+
+      // Auto-save to localStorage
+      const savedDims = pythonGeo ? pythonGeo.dimensions_mm : stlData ? { x: stlData.boundingBox.width, y: stlData.boundingBox.height, z: stlData.boundingBox.depth } : undefined;
+      saveAnalysis({
+        partName: partName.trim(),
+        filename: uploadedFileName || 'unknown',
+        timestamp: new Date().toISOString(),
+        designScore: Math.max(0, score),
+        annotationsArray: parsedAnnotations,
+        analysisText: fullText,
+        geometryData: pythonGeo || null,
+        severityCards: parsedAnnotations.map(a => ({ severity: a.severity, title: a.title, description: a.problem })),
+        dimensions: savedDims,
+      });
+      sonnerToast.success(`Analysis saved as "${partName.trim()}"`);
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
@@ -565,6 +591,17 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
 
         {/* LEFT PANEL — Parts List & Controls */}
         <div className="lg:col-span-3 space-y-3 order-2 lg:order-1">
+          {/* Part Name Input */}
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Part Name *</label>
+            <input
+              value={partName}
+              onChange={e => setPartName(e.target.value)}
+              placeholder="e.g. Drone Head, Front Arm, Motor Mount"
+              className="w-full bg-background/50 border border-primary/30 rounded-lg px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+            />
+          </div>
+
           {/* Upload zone */}
           <input ref={modelInputRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden" onChange={handleModelInput} />
           <Button variant="outline" className="w-full gap-2 text-xs h-9" onClick={() => modelInputRef.current?.click()}>
@@ -864,6 +901,8 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
                   </p>
                   <p className="text-sm text-foreground/85 leading-relaxed">{detailAnnotation.solution}</p>
                 </div>
+                {/* CAD Fix Instructions */}
+                <CADFixInstructions annotation={detailAnnotation} pythonGeo={pythonGeo} stlData={stlData} />
                 {!detailAnnotation.resolved ? (
                   <Button
                     variant="outline"

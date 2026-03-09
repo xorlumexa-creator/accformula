@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
@@ -236,6 +237,7 @@ function AssemblyModel({ url, fileType, viewMode, geometry, onBoundsReady }: {
 /* ─── Main Page ─── */
 export default function AssemblyBuilderPage() {
   const { user } = useAuth();
+  const { analyses: savedDesigns } = useDesignAnalyses();
   const [file, setFile] = useState<File | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [fileType, setFileType] = useState('stl');
@@ -586,6 +588,32 @@ Annotation rules:
           </p>
         </div>
 
+        {/* Parts Analysis Status */}
+        {savedDesigns.length > 0 && (
+          <div className="px-6 pb-4">
+            <div className="rounded-lg border border-border/30 p-4" style={{ background: '#111111' }}>
+              <h3 className="text-sm font-bold text-foreground mb-1">Parts Analysis Status</h3>
+              <p className="text-[10px] text-muted-foreground mb-3">
+                For best results, analyse each individual part in Insert Design page before inspecting the full assembly.
+              </p>
+              <div className="space-y-1.5">
+                {savedDesigns.map((d, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg bg-background/50 px-3 py-2 border border-border/20">
+                    <div className="flex items-center gap-2">
+                      <span className="text-green-400 text-xs">✓</span>
+                      <span className="text-xs font-medium text-foreground">{d.partName}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] bg-green-600/20 text-green-400 px-1.5 py-0.5 rounded font-medium">Analysed</span>
+                      <span className="text-[9px] text-muted-foreground">{new Date(d.timestamp).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Upload Zone */}
         <div className="flex-1 flex flex-col items-center justify-center px-6 pb-6">
           <label
@@ -607,7 +635,7 @@ Annotation rules:
             {[
               { n: '1', title: 'Design in CAD', desc: 'Create and assemble your parts in SolidWorks, Fusion 360, or any CAD software' },
               { n: '2', title: 'Export Assembly', desc: 'Export your complete assembled design as STL or OBJ file' },
-              { n: '3', title: 'Get AI Report', desc: 'Lumexa analyzes every joint, stress point, and abnormality in seconds' },
+              { n: '3', title: 'Get AI Report', desc: 'Dynaxor analyzes every joint, stress point, and abnormality in seconds' },
             ].map(c => (
               <div key={c.n} className="rounded-lg border border-border p-4" style={{ background: '#111111' }}>
                 <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold mb-3">{c.n}</span>
