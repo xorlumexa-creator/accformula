@@ -19,6 +19,7 @@ import {
   X, Eye, Target, Wrench,
 } from 'lucide-react';
 import CADViewer, { type Annotation, type STLData, type HeatSensor, type GeometryZone, ZONE_CONFIG } from '@/components/CADViewer';
+import CADFixInstructions from '@/components/CADFixInstructions';
 import { useTelemetry } from '@/context/TelemetryContext';
 import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { toast as sonnerToast } from 'sonner';
