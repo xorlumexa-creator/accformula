@@ -900,6 +900,8 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
                   </p>
                   <p className="text-sm text-foreground/85 leading-relaxed">{detailAnnotation.solution}</p>
                 </div>
+                {/* CAD Fix Instructions */}
+                <CADFixInstructions annotation={detailAnnotation} pythonGeo={pythonGeo} stlData={stlData} />
                 {!detailAnnotation.resolved ? (
                   <Button
                     variant="outline"
