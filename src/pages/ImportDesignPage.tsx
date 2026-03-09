@@ -536,8 +536,7 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
       setResult({ content: fullText, annotations: parsedAnnotations });
 
       // Auto-save to localStorage
-      const pg = pythonGeo;
-      const dims2 = pg ? pg.dimensions_mm : stlData ? { x: stlData.boundingBox.width, y: stlData.boundingBox.height, z: stlData.boundingBox.depth } : undefined;
+      const savedDims = pythonGeo ? pythonGeo.dimensions_mm : stlData ? { x: stlData.boundingBox.width, y: stlData.boundingBox.height, z: stlData.boundingBox.depth } : undefined;
       saveAnalysis({
         partName: partName.trim(),
         filename: uploadedFileName || 'unknown',
