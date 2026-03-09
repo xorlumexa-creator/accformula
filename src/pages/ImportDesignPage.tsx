@@ -590,6 +590,17 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
 
         {/* LEFT PANEL — Parts List & Controls */}
         <div className="lg:col-span-3 space-y-3 order-2 lg:order-1">
+          {/* Part Name Input */}
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Part Name *</label>
+            <input
+              value={partName}
+              onChange={e => setPartName(e.target.value)}
+              placeholder="e.g. Drone Head, Front Arm, Motor Mount"
+              className="w-full bg-background/50 border border-primary/30 rounded-lg px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+            />
+          </div>
+
           {/* Upload zone */}
           <input ref={modelInputRef} type="file" accept=".stl,.obj,.gltf,.glb" className="hidden" onChange={handleModelInput} />
           <Button variant="outline" className="w-full gap-2 text-xs h-9" onClick={() => modelInputRef.current?.click()}>
