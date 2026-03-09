@@ -23,7 +23,6 @@ import { useTelemetry } from '@/context/TelemetryContext';
 import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { toast as sonnerToast } from 'sonner';
 import Papa from 'papaparse';
-import Papa from 'papaparse';
 
 const PYTHON_API = 'https://1d1141ef-3925-4e14-84d3-439cca800d44-00-38kio9wyr2lpc.sisko.replit.dev:8000/analyze-part';
 
