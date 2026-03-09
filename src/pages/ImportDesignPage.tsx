@@ -20,6 +20,9 @@ import {
 } from 'lucide-react';
 import CADViewer, { type Annotation, type STLData, type HeatSensor, type GeometryZone, ZONE_CONFIG } from '@/components/CADViewer';
 import { useTelemetry } from '@/context/TelemetryContext';
+import { useDesignAnalyses } from '@/hooks/useLocalStorage';
+import { toast as sonnerToast } from 'sonner';
+import Papa from 'papaparse';
 import Papa from 'papaparse';
 
 const PYTHON_API = 'https://1d1141ef-3925-4e14-84d3-439cca800d44-00-38kio9wyr2lpc.sisko.replit.dev:8000/analyze-part';
@@ -91,6 +94,10 @@ export default function ImportDesignPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const telemetry = useTelemetry();
+  const { saveAnalysis } = useDesignAnalyses();
+
+  // Part name
+  const [partName, setPartName] = useState('');
 
   // Core state
   const [software, setSoftware] = useState('');
