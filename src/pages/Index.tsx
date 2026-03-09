@@ -6,15 +6,14 @@ import MetricCard from '@/components/MetricCard';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Gauge, Zap, Thermometer, Clock, Database, Activity,
-  Upload, FileInput, MessageSquare, Timer, Radio, BarChart3
+  Upload, FileInput, MessageSquare, Timer, Search
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 
 const navCards = [
-  { to: '/upload', icon: Upload, label: 'Upload Data', desc: 'Import CSV / telemetry files' },
-  { to: '/import-design', icon: FileInput, label: 'Design Import', desc: 'CAD data & analysis' },
-  { to: '/sensors', icon: Radio, label: 'Sensors', desc: 'IoT sensor integration' },
-  { to: '/analysis', icon: BarChart3, label: 'Analysis', desc: 'Charts & metrics' },
+  { to: '/upload', icon: Upload, label: 'Sensor Telemetry', desc: 'Import CSV / telemetry files' },
+  { to: '/import-design', icon: FileInput, label: 'Insert Design', desc: 'CAD data & analysis' },
+  { to: '/assembly', icon: Search, label: 'Inspector', desc: 'Assembly inspection' },
   { to: '/chat', icon: MessageSquare, label: 'AI Chat', desc: 'Engineering assistant' },
   { to: '/lap-calculator', icon: Timer, label: 'Lap Calculator', desc: 'Track lap times' },
 ];

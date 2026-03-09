@@ -9,10 +9,10 @@ import AppLayout from "./components/AppLayout";
 import Index from "./pages/Index";
 import UploadPage from "./pages/UploadPage";
 import ImportDesignPage from "./pages/ImportDesignPage";
-import AnalysisPage from "./pages/AnalysisPage";
+
 import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
-import SensorIntegrationPage from "./pages/SensorIntegrationPage";
+
 import FEAAnalysisPage from "./pages/FEAAnalysisPage";
 import AssemblyBuilderPage from "./pages/AssemblyBuilderPage";
 import AuthPage from "./pages/AuthPage";
@@ -50,10 +50,10 @@ const App = () => (
                 <Route path="/" element={<Index />} />
                 <Route path="/upload" element={<UploadPage />} />
                 <Route path="/import-design" element={<ImportDesignPage />} />
-                <Route path="/analysis" element={<AnalysisPage />} />
+                
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/lap-calculator" element={<LapCalculatorPage />} />
-              <Route path="/sensors" element={<SensorIntegrationPage />} />
+              
               <Route path="/fea" element={<FEAAnalysisPage />} />
               <Route path="/assembly" element={<AssemblyBuilderPage />} />
               </Route>
