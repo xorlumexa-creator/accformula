@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
@@ -607,7 +608,7 @@ Annotation rules:
             {[
               { n: '1', title: 'Design in CAD', desc: 'Create and assemble your parts in SolidWorks, Fusion 360, or any CAD software' },
               { n: '2', title: 'Export Assembly', desc: 'Export your complete assembled design as STL or OBJ file' },
-              { n: '3', title: 'Get AI Report', desc: 'Lumexa analyzes every joint, stress point, and abnormality in seconds' },
+              { n: '3', title: 'Get AI Report', desc: 'Dynaxor analyzes every joint, stress point, and abnormality in seconds' },
             ].map(c => (
               <div key={c.n} className="rounded-lg border border-border p-4" style={{ background: '#111111' }}>
                 <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold mb-3">{c.n}</span>
