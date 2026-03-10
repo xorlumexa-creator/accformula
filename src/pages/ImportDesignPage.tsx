@@ -568,6 +568,26 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
         dimensions: savedDims,
       });
       sonnerToast.success(`Analysis saved as "${partName.trim()}"`);
+
+      // Generate comparison if in comparison mode
+      if (comparisonMode && previousAnalysis) {
+        const prevAnns = previousAnalysis.annotationsArray || [];
+        const newAnns = parsedAnnotations;
+        const prevTitles = new Set(prevAnns.map((a: any) => a.title?.toLowerCase()));
+        const newTitles = new Set(newAnns.map((a: any) => a.title?.toLowerCase()));
+        const resolved = prevAnns.filter((a: any) => !newTitles.has(a.title?.toLowerCase()));
+        const newIssuesFound = newAnns.filter((a: any) => !prevTitles.has(a.title?.toLowerCase()));
+        const remaining = newAnns.filter((a: any) => prevTitles.has(a.title?.toLowerCase()));
+        const scoreDiff = Math.max(0, score) - (previousAnalysis.designScore || 0);
+        let verdict = 'NO CHANGE';
+        if (scoreDiff > 20) verdict = 'SIGNIFICANT IMPROVEMENT';
+        else if (scoreDiff > 10) verdict = 'MODERATE IMPROVEMENT';
+        else if (scoreDiff > 0) verdict = 'MINOR IMPROVEMENT';
+        else if (scoreDiff < 0) verdict = 'REGRESSION';
+        setComparisonReport({ prevScore: previousAnalysis.designScore, newScore: Math.max(0, score), scoreDiff, verdict, resolved, newIssues: newIssuesFound, remaining, prevDate: previousAnalysis.timestamp, newDate: new Date().toISOString() });
+        setComparisonMode(false);
+        setShowComparisonBanner(false);
+      }
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
