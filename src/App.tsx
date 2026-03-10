@@ -12,7 +12,7 @@ import ImportDesignPage from "./pages/ImportDesignPage";
 
 import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
-
+import DesignGeneratorPage from "./pages/DesignGeneratorPage";
 import FEAAnalysisPage from "./pages/FEAAnalysisPage";
 import AssemblyBuilderPage from "./pages/AssemblyBuilderPage";
 import AuthPage from "./pages/AuthPage";
