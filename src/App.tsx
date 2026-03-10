@@ -56,6 +56,7 @@ const App = () => (
               
               <Route path="/fea" element={<FEAAnalysisPage />} />
               <Route path="/assembly" element={<AssemblyBuilderPage />} />
+              <Route path="/design-generator" element={<DesignGeneratorPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
