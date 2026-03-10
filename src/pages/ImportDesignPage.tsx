@@ -238,6 +238,17 @@ export default function ImportDesignPage() {
       toast({ title: 'File exceeds 50MB limit', description: 'Please optimize your STL first.', variant: 'destructive' });
       return;
     }
+    // Check for previous analysis of same part name
+    if (partName.trim()) {
+      const prev = getAnalysisByPartName(partName.trim());
+      if (prev.length > 0) {
+        setPreviousAnalysis(prev[prev.length - 1]);
+        setShowComparisonBanner(true);
+      } else {
+        setShowComparisonBanner(false);
+        setPreviousAnalysis(null);
+      }
+    }
     setModelLoading(true);
     setStlData(null);
     setPythonGeo(null);
@@ -248,6 +259,7 @@ export default function ImportDesignPage() {
     setResult(null);
     setAnnotations([]);
     setDetailAnnotation(null);
+    setComparisonReport(null);
     if (modelUrl) URL.revokeObjectURL(modelUrl);
     const url = URL.createObjectURL(file);
     setModelUrl(url);
@@ -256,7 +268,7 @@ export default function ImportDesignPage() {
     setUploadedFileName(file.name);
     setTimeout(() => setModelLoading(false), 300);
     fetchPythonGeo(file);
-  }, [modelUrl, toast, fetchPythonGeo]);
+  }, [modelUrl, toast, fetchPythonGeo, partName, getAnalysisByPartName]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
