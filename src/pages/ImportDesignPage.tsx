@@ -94,10 +94,16 @@ export default function ImportDesignPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const telemetry = useTelemetry();
-  const { saveAnalysis } = useDesignAnalyses();
+  const { saveAnalysis, analyses, getAnalysisByPartName } = useDesignAnalyses();
 
   // Part name
   const [partName, setPartName] = useState('');
+
+  // Before vs After comparison
+  const [showComparisonBanner, setShowComparisonBanner] = useState(false);
+  const [previousAnalysis, setPreviousAnalysis] = useState<any>(null);
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const [comparisonReport, setComparisonReport] = useState<any>(null);
 
   // Core state
   const [software, setSoftware] = useState('');
