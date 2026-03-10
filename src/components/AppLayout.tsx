@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Sparkles } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import dynaxorLogo from '@/assets/dynaxor-logo.webp';
 
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/assembly', icon: Search, label: 'Inspector' },
   { to: '/fea', icon: Microscope, label: 'FEA' },
   { to: '/chat', icon: MessageSquare, label: 'AI Chat' },
+  { to: '/design-generator', icon: Sparkles, label: 'Design Generator' },
   { to: '/lap-calculator', icon: Timer, label: 'Lap Calc' },
 ];
 

@@ -94,10 +94,16 @@ export default function ImportDesignPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const telemetry = useTelemetry();
-  const { saveAnalysis } = useDesignAnalyses();
+  const { saveAnalysis, analyses, getAnalysisByPartName } = useDesignAnalyses();
 
   // Part name
   const [partName, setPartName] = useState('');
+
+  // Before vs After comparison
+  const [showComparisonBanner, setShowComparisonBanner] = useState(false);
+  const [previousAnalysis, setPreviousAnalysis] = useState<any>(null);
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const [comparisonReport, setComparisonReport] = useState<any>(null);
 
   // Core state
   const [software, setSoftware] = useState('');
@@ -232,6 +238,17 @@ export default function ImportDesignPage() {
       toast({ title: 'File exceeds 50MB limit', description: 'Please optimize your STL first.', variant: 'destructive' });
       return;
     }
+    // Check for previous analysis of same part name
+    if (partName.trim()) {
+      const prev = getAnalysisByPartName(partName.trim());
+      if (prev.length > 0) {
+        setPreviousAnalysis(prev[prev.length - 1]);
+        setShowComparisonBanner(true);
+      } else {
+        setShowComparisonBanner(false);
+        setPreviousAnalysis(null);
+      }
+    }
     setModelLoading(true);
     setStlData(null);
     setPythonGeo(null);
@@ -242,6 +259,7 @@ export default function ImportDesignPage() {
     setResult(null);
     setAnnotations([]);
     setDetailAnnotation(null);
+    setComparisonReport(null);
     if (modelUrl) URL.revokeObjectURL(modelUrl);
     const url = URL.createObjectURL(file);
     setModelUrl(url);
@@ -250,7 +268,7 @@ export default function ImportDesignPage() {
     setUploadedFileName(file.name);
     setTimeout(() => setModelLoading(false), 300);
     fetchPythonGeo(file);
-  }, [modelUrl, toast, fetchPythonGeo]);
+  }, [modelUrl, toast, fetchPythonGeo, partName, getAnalysisByPartName]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -550,6 +568,26 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
         dimensions: savedDims,
       });
       sonnerToast.success(`Analysis saved as "${partName.trim()}"`);
+
+      // Generate comparison if in comparison mode
+      if (comparisonMode && previousAnalysis) {
+        const prevAnns = previousAnalysis.annotationsArray || [];
+        const newAnns = parsedAnnotations;
+        const prevTitles = new Set(prevAnns.map((a: any) => a.title?.toLowerCase()));
+        const newTitles = new Set(newAnns.map((a: any) => a.title?.toLowerCase()));
+        const resolved = prevAnns.filter((a: any) => !newTitles.has(a.title?.toLowerCase()));
+        const newIssuesFound = newAnns.filter((a: any) => !prevTitles.has(a.title?.toLowerCase()));
+        const remaining = newAnns.filter((a: any) => prevTitles.has(a.title?.toLowerCase()));
+        const scoreDiff = Math.max(0, score) - (previousAnalysis.designScore || 0);
+        let verdict = 'NO CHANGE';
+        if (scoreDiff > 20) verdict = 'SIGNIFICANT IMPROVEMENT';
+        else if (scoreDiff > 10) verdict = 'MODERATE IMPROVEMENT';
+        else if (scoreDiff > 0) verdict = 'MINOR IMPROVEMENT';
+        else if (scoreDiff < 0) verdict = 'REGRESSION';
+        setComparisonReport({ prevScore: previousAnalysis.designScore, newScore: Math.max(0, score), scoreDiff, verdict, resolved, newIssues: newIssuesFound, remaining, prevDate: previousAnalysis.timestamp, newDate: new Date().toISOString() });
+        setComparisonMode(false);
+        setShowComparisonBanner(false);
+      }
     } catch (err: any) {
       toast({ title: err.message || 'Analysis failed', variant: 'destructive' });
     } finally {
@@ -585,6 +623,109 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
           <p className="text-sm text-muted-foreground">Upload 3D models, extract geometry, detect issues with AI-powered annotations</p>
         </div>
       </div>
+
+      {/* Comparison Banner */}
+      {showComparisonBanner && previousAnalysis && (
+        <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-sm font-medium text-blue-400">
+              Previous analysis of "{previousAnalysis.partName}" found from {new Date(previousAnalysis.timestamp).toLocaleDateString()}
+            </p>
+            <p className="text-xs text-muted-foreground">Score: {previousAnalysis.designScore} — Would you like to compare versions?</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setComparisonMode(true); setShowComparisonBanner(false); }}
+              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+              Compare Versions
+            </button>
+            <button onClick={() => setShowComparisonBanner(false)}
+              className="px-3 py-1.5 rounded-lg bg-secondary text-muted-foreground text-xs font-medium hover:bg-secondary/80 transition-colors">
+              Analyse Separately
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison Report */}
+      {comparisonReport && (
+        <Dialog open={!!comparisonReport} onOpenChange={() => setComparisonReport(null)}>
+          <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-primary font-display">
+                Design Improvement Report — {partName}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {/* Score Comparison */}
+              <div className="flex items-center justify-center gap-6">
+                <div className="text-center rounded-lg border border-border/30 p-4 flex-1" style={{ background: '#1a0000' }}>
+                  <p className="text-xs text-muted-foreground mb-1">Version 1 — {new Date(comparisonReport.prevDate).toLocaleDateString()}</p>
+                  <p className="text-3xl font-bold text-destructive">{comparisonReport.prevScore}</p>
+                </div>
+                <div className="text-center">
+                  <p className={`text-lg font-bold ${comparisonReport.scoreDiff >= 0 ? 'text-green-400' : 'text-destructive'}`}>
+                    {comparisonReport.scoreDiff >= 0 ? '+' : ''}{comparisonReport.scoreDiff} pts
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">→</p>
+                </div>
+                <div className="text-center rounded-lg border border-border/30 p-4 flex-1" style={{ background: comparisonReport.scoreDiff >= 0 ? '#001a00' : '#1a0000' }}>
+                  <p className="text-xs text-muted-foreground mb-1">Version 2 — {new Date(comparisonReport.newDate).toLocaleDateString()}</p>
+                  <p className={`text-3xl font-bold ${comparisonReport.scoreDiff >= 0 ? 'text-green-400' : 'text-destructive'}`}>{comparisonReport.newScore}</p>
+                </div>
+              </div>
+
+              {/* Verdict */}
+              <div className="text-center py-2">
+                <Badge className={`text-sm px-4 py-1 ${comparisonReport.verdict.includes('IMPROVEMENT') ? 'bg-green-600' : comparisonReport.verdict === 'REGRESSION' ? 'bg-destructive' : 'bg-muted'}`}>
+                  {comparisonReport.verdict}
+                </Badge>
+              </div>
+
+              {/* Issues Resolved */}
+              {comparisonReport.resolved.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-bold text-green-400 mb-2 flex items-center gap-2"><CheckCircle className="w-4 h-4" /> Issues Resolved</h4>
+                  {comparisonReport.resolved.map((a: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+                      <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
+                      <span className="line-through">{a.title}</span>
+                      <Badge className="bg-muted text-[10px]">{a.severity}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* New Issues */}
+              {comparisonReport.newIssues.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-bold text-destructive mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> New Issues Detected</h4>
+                  {comparisonReport.newIssues.map((a: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+                      <AlertTriangle className="w-3 h-3 text-destructive shrink-0" />
+                      <span>{a.title}</span>
+                      <Badge className={`text-[10px] ${a.severity === 'CRITICAL' ? 'bg-destructive' : a.severity === 'HIGH' ? 'bg-orange-600' : 'bg-yellow-600'}`}>{a.severity}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Remaining */}
+              {comparisonReport.remaining.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-bold text-orange-400 mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Still Needs Attention</h4>
+                  {comparisonReport.remaining.map((a: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+                      <span className="w-3 h-3 rounded-full bg-orange-600/30 shrink-0" />
+                      <span>{a.title}</span>
+                      <Badge className="bg-orange-600/20 text-orange-400 text-[10px]">{a.severity}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Three-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
