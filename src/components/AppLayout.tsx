@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Sparkles } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import dynaxorLogo from '@/assets/dynaxor-logo.webp';
 
