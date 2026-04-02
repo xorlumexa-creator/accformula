@@ -9,14 +9,15 @@ import AppLayout from "./components/AppLayout";
 import Index from "./pages/Index";
 import UploadPage from "./pages/UploadPage";
 import ImportDesignPage from "./pages/ImportDesignPage";
-
 import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
-import DesignGeneratorPage from "./pages/DesignGeneratorPage";
 import FEAAnalysisPage from "./pages/FEAAnalysisPage";
 import AssemblyBuilderPage from "./pages/AssemblyBuilderPage";
 import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
+import ProjectPlanPage from "./pages/ProjectPlanPage";
+import PartsPage from "./pages/PartsPage";
+import DesignGuidePage from "./pages/DesignGuidePage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,13 +51,13 @@ const App = () => (
                 <Route path="/" element={<Index />} />
                 <Route path="/upload" element={<UploadPage />} />
                 <Route path="/import-design" element={<ImportDesignPage />} />
-                
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/lap-calculator" element={<LapCalculatorPage />} />
-              
-              <Route path="/fea" element={<FEAAnalysisPage />} />
-              <Route path="/assembly" element={<AssemblyBuilderPage />} />
-              <Route path="/design-generator" element={<DesignGeneratorPage />} />
+                <Route path="/fea" element={<FEAAnalysisPage />} />
+                <Route path="/assembly" element={<AssemblyBuilderPage />} />
+                <Route path="/project-plan" element={<ProjectPlanPage />} />
+                <Route path="/parts" element={<PartsPage />} />
+                <Route path="/design-guide/:partId" element={<DesignGuidePage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

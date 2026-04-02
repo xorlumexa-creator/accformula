@@ -40,7 +40,7 @@ interface Brief {
 }
 
 const GEN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
-const OPENING_MSG = "Hello! I'm your Dynaxor Design Engineer. I'll help you plan your build from scratch by asking the right engineering questions.\n\nLet's start simple — **what do you want to build?** Describe it in your own words, no technical knowledge needed.";
+const OPENING_MSG = "Hello! I'm your Lumexa Design Engineer. I'll help you plan your build from scratch by asking the right engineering questions.\n\nLet's start simple — **what do you want to build?** Describe it in your own words, no technical knowledge needed.";
 
 export default function DesignGeneratorPage() {
   const { user } = useAuth();

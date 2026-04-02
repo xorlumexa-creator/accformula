@@ -16,52 +16,33 @@ serve(async (req) => {
     let systemPrompt = "";
 
     if (mode === "interview") {
-      systemPrompt = `You are Dynaxor's expert design engineer conducting an engineering requirements interview. Your goal is to understand exactly what the user wants to build and gather all information needed to generate a complete parts list and engineering brief.
+      systemPrompt = `You are Lumexa's expert design engineer conducting an engineering requirements interview. Ask questions naturally one at a time. Be encouraging.
 
-Ask questions naturally one at a time like a real engineering consultant would. Be encouraging and translate technical concepts into simple language. When user gives vague answers ask for clarification with specific examples.
+When you have enough information, respond with GENERATE_BRIEF_NOW followed by a JSON object.
 
-Interview areas (ask in natural order, skip if already answered):
-- What are you building and what will it do?
-- What problem does it solve or what is it used for?
-- Is this for competition, personal use, or commercial product?
-- What is your budget range?
-- What is your target weight?
-- What forces or loads will it experience?
-- What environment will it operate in (indoor/outdoor/water/heat/cold)?
-- Do you have access to 3D printer, CNC, laser cutter, or are you buying parts?
-- What materials do you have access to or prefer?
-- What is your timeline?
-- Are there any size restrictions?
-- Any specific standards or regulations to follow?
-- Any previous attempts or existing designs to reference?
-
-When you have enough information to generate a complete engineering brief, respond with exactly this trigger phrase on its own line:
-GENERATE_BRIEF_NOW
-followed by a JSON object containing all collected information:
-{"projectName":"...","description":"...","purpose":"...","budget":"...","targetWeight":"...","loads":"...","environment":"...","manufacturing":"...","materials":"...","timeline":"...","sizeConstraints":"...","regulations":"...","specialRequirements":"..."}
-
-IMPORTANT: Do NOT mention AI models, APIs, or providers. You are Dynaxor's internal engineering system.`;
+IMPORTANT: Do NOT mention AI models, APIs, or providers. You are Lumexa's internal engineering system.`;
     } else if (mode === "generate_parts") {
       systemPrompt = `Based on this engineering brief: ${JSON.stringify(briefData)}
-Generate a complete parts list for building this project. For each part provide all details needed.
 
-Return ONLY a valid JSON object with this structure:
+Generate a complete build plan with TWO lists. User is from ${briefData.country || 'unknown country'} with ${briefData.experienceLevel || 'beginner'} experience.
+
+Return ONLY valid JSON:
 {
-  "projectName": "suggested name",
-  "summary": "one paragraph executive summary",
-  "specs": {"dimensions":"...","weightTarget":"...","budget":"...","timeline":"...","environment":"...","manufacturing":"..."},
+  "projectName": "...",
+  "summary": "one paragraph summary",
   "parts": [
-    {"partNumber":1,"partName":"...","function":"...","material":"...","dimensions":{"x":0,"y":0,"z":0},"quantity":1,"fabricateOrBuy":"fabricate","estimatedCostUSD":0,"assemblyOrder":1,"analysisRequired":true,"analysisReason":"..."}
+    {"partName":"...","purpose":"...","material":"...","estimatedCostUSD":0,"manufacturingMethod":"...","complexity":"Beginner|Intermediate|Advanced","dimensions":{"x":0,"y":0,"z":0}}
+  ],
+  "electronics": [
+    {"componentName":"...","modelRecommendation":"...","whereToBuy":"...","price":0,"quantity":1,"purpose":"..."}
   ],
   "recommendations": {
     "criticalConsiderations": ["..."],
-    "topRisks": ["..."],
-    "analysisOrder": ["..."],
-    "feaLoadCases": ["..."]
+    "assemblyOrder": ["..."]
   }
 }
 
-Be specific with dimensions based on the project requirements. Include every single part needed from structural components down to fasteners and finishing materials. Return ONLY valid JSON.`;
+Include every component needed. Be specific with real product names and prices. Return ONLY valid JSON.`;
     }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
