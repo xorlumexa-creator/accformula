@@ -75,65 +75,278 @@ export type Database = {
       }
       profiles: {
         Row: {
+          cad_software: string | null
+          country: string | null
           created_at: string
+          date_of_birth: string | null
+          experience_level: string | null
           gps_location: string | null
           id: string
           name: string
+          occupation: string | null
+          primary_purpose: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          cad_software?: string | null
+          country?: string | null
           created_at?: string
+          date_of_birth?: string | null
+          experience_level?: string | null
           gps_location?: string | null
           id?: string
           name?: string
+          occupation?: string | null
+          primary_purpose?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          cad_software?: string | null
+          country?: string | null
           created_at?: string
+          date_of_birth?: string | null
+          experience_level?: string | null
           gps_location?: string | null
           id?: string
           name?: string
+          occupation?: string | null
+          primary_purpose?: string | null
           updated_at?: string
           user_id?: string
         }
         Relationships: []
       }
-      projects: {
+      project_electronics: {
         Row: {
-          budget_range: string | null
-          category: string | null
+          component_name: string
+          created_at: string
+          id: string
+          model_recommendation: string | null
+          price: number | null
+          project_id: string
+          purpose: string | null
+          quantity: number | null
+          sort_order: number | null
+          status: string | null
+          updated_at: string
+          user_id: string
+          where_to_buy: string | null
+        }
+        Insert: {
+          component_name?: string
+          created_at?: string
+          id?: string
+          model_recommendation?: string | null
+          price?: number | null
+          project_id: string
+          purpose?: string | null
+          quantity?: number | null
+          sort_order?: number | null
+          status?: string | null
+          updated_at?: string
+          user_id: string
+          where_to_buy?: string | null
+        }
+        Update: {
+          component_name?: string
+          created_at?: string
+          id?: string
+          model_recommendation?: string | null
+          price?: number | null
+          project_id?: string
+          purpose?: string | null
+          quantity?: number | null
+          sort_order?: number | null
+          status?: string | null
+          updated_at?: string
+          user_id?: string
+          where_to_buy?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_electronics_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_parts: {
+        Row: {
           complexity: string | null
           created_at: string
-          description: string | null
+          design_guide: string | null
+          estimated_cost: number | null
+          fix_guide: string | null
           id: string
-          project_name: string
-          purpose: string | null
+          manufacturing_method: string | null
+          material: string | null
+          part_name: string
+          project_id: string
+          sort_order: number | null
+          status: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
-          budget_range?: string | null
-          category?: string | null
           complexity?: string | null
           created_at?: string
-          description?: string | null
+          design_guide?: string | null
+          estimated_cost?: number | null
+          fix_guide?: string | null
           id?: string
-          project_name?: string
-          purpose?: string | null
+          manufacturing_method?: string | null
+          material?: string | null
+          part_name?: string
+          project_id: string
+          sort_order?: number | null
+          status?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          complexity?: string | null
+          created_at?: string
+          design_guide?: string | null
+          estimated_cost?: number | null
+          fix_guide?: string | null
+          id?: string
+          manufacturing_method?: string | null
+          material?: string | null
+          part_name?: string
+          project_id?: string
+          sort_order?: number | null
+          status?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_parts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_tasks: {
+        Row: {
+          created_at: string
+          estimated_hours: number | null
+          id: string
+          phase: number | null
+          project_id: string
+          sort_order: number | null
+          status: string | null
+          task_number: number
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          estimated_hours?: number | null
+          id?: string
+          phase?: number | null
+          project_id: string
+          sort_order?: number | null
+          status?: string | null
+          task_number?: number
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          estimated_hours?: number | null
+          id?: string
+          phase?: number | null
+          project_id?: string
+          sort_order?: number | null
+          status?: string | null
+          task_number?: number
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          budget_currency: string | null
+          budget_range: string | null
+          category: string | null
+          complexity: string | null
+          control_method: string | null
+          created_at: string
+          current_phase: number | null
+          description: string | null
+          environment: string | null
+          has_3d_printer: boolean | null
+          id: string
+          microcontroller: string | null
+          power_source: string | null
+          progress_percent: number | null
+          project_name: string
+          purpose: string | null
+          target_size: string | null
+          target_weight: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          budget_currency?: string | null
           budget_range?: string | null
           category?: string | null
           complexity?: string | null
+          control_method?: string | null
           created_at?: string
+          current_phase?: number | null
           description?: string | null
+          environment?: string | null
+          has_3d_printer?: boolean | null
           id?: string
+          microcontroller?: string | null
+          power_source?: string | null
+          progress_percent?: number | null
           project_name?: string
           purpose?: string | null
+          target_size?: string | null
+          target_weight?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          budget_currency?: string | null
+          budget_range?: string | null
+          category?: string | null
+          complexity?: string | null
+          control_method?: string | null
+          created_at?: string
+          current_phase?: number | null
+          description?: string | null
+          environment?: string | null
+          has_3d_printer?: boolean | null
+          id?: string
+          microcontroller?: string | null
+          power_source?: string | null
+          progress_percent?: number | null
+          project_name?: string
+          purpose?: string | null
+          target_size?: string | null
+          target_weight?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -204,6 +417,42 @@ export type Database = {
           file_name?: string
           id?: string
           row_count?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_streaks: {
+        Row: {
+          created_at: string
+          current_streak: number | null
+          id: string
+          last_active_date: string | null
+          longest_streak: number | null
+          streak_freeze_available: boolean | null
+          streak_freeze_used_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_streak?: number | null
+          id?: string
+          last_active_date?: string | null
+          longest_streak?: number | null
+          streak_freeze_available?: boolean | null
+          streak_freeze_used_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          current_streak?: number | null
+          id?: string
+          last_active_date?: string | null
+          longest_streak?: number | null
+          streak_freeze_available?: boolean | null
+          streak_freeze_used_at?: string | null
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
