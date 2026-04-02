@@ -368,7 +368,7 @@ export default function AssemblyBuilderPage() {
     const massAl = (vol * 0.0000027).toFixed(3);
     const massCF = (vol * 0.0000016).toFixed(3);
 
-    const prompt = `You are Dynaxor Engineering AI performing a complete assembly quality inspection.
+    const prompt = `You are Lumexa Engineering AI performing a complete assembly quality inspection.
 
 USER PROJECT CONTEXT:
 Project: ${projectContext?.name || 'Not specified'}
@@ -635,7 +635,7 @@ Annotation rules:
             {[
               { n: '1', title: 'Design in CAD', desc: 'Create and assemble your parts in SolidWorks, Fusion 360, or any CAD software' },
               { n: '2', title: 'Export Assembly', desc: 'Export your complete assembled design as STL or OBJ file' },
-              { n: '3', title: 'Get AI Report', desc: 'Dynaxor analyzes every joint, stress point, and abnormality in seconds' },
+              { n: '3', title: 'Get AI Report', desc: 'Lumexa analyzes every joint, stress point, and abnormality in seconds' },
             ].map(c => (
               <div key={c.n} className="rounded-lg border border-border p-4" style={{ background: '#111111' }}>
                 <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold mb-3">{c.n}</span>

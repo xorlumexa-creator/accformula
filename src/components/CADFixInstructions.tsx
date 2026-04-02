@@ -248,7 +248,7 @@ function getFixSteps(issueType: IssueType, softwareId: string, dims?: { x: numbe
         'Apply appropriate fix: Modify → Press Pull, Fillet, or Shell',
         'Reference the specific dimensions from the analysis report',
         'Validate changes with Inspect → Interference check',
-        'Re-export and re-analyze in Dynaxor to confirm improvement',
+        'Re-export and re-analyze in Lumexa to confirm improvement',
       ],
       solidworks: [
         'Locate the flagged region in the Feature Manager tree',
@@ -256,12 +256,12 @@ function getFixSteps(issueType: IssueType, softwareId: string, dims?: { x: numbe
         'Use appropriate tools: Boss/Base, Cut, Fillet, Shell, or Draft',
         'Apply exact dimensions from the analysis report',
         'Run Evaluate → Check Entity to validate geometry',
-        'Re-export and re-analyze in Dynaxor to verify the fix',
+        'Re-export and re-analyze in Lumexa to verify the fix',
       ],
       freecad: [
         'Find the affected area in the Model tree',
         'Use Part Design tools: Pad, Pocket, Fillet, or Chamfer',
-        'Apply dimensions from the Dynaxor analysis report',
+        'Apply dimensions from the Lumexa analysis report',
         'Check Geometry after each modification',
         'Use Undo (Ctrl+Z) if geometry becomes invalid',
         'Re-export and re-analyze to confirm improvement',
@@ -272,7 +272,7 @@ function getFixSteps(issueType: IssueType, softwareId: string, dims?: { x: numbe
         'Reference exact dimensions from the analysis report',
         'Use Mesh → Clean Up tools after modifications',
         'Check with 3D Print Toolbox for remaining issues',
-        'Re-export and re-analyze in Dynaxor to verify the fix',
+        'Re-export and re-analyze in Lumexa to verify the fix',
       ],
     },
   };

@@ -16,7 +16,7 @@ serve(async (req) => {
     let systemPrompt = "";
 
     if (mode === "interview") {
-      systemPrompt = `You are Dynaxor's expert design engineer conducting an engineering requirements interview. Your goal is to understand exactly what the user wants to build and gather all information needed to generate a complete parts list and engineering brief.
+      systemPrompt = `You are Lumexa's expert design engineer conducting an engineering requirements interview. Your goal is to understand exactly what the user wants to build and gather all information needed to generate a complete parts list and engineering brief.
 
 Ask questions naturally one at a time like a real engineering consultant would. Be encouraging and translate technical concepts into simple language. When user gives vague answers ask for clarification with specific examples.
 
@@ -40,7 +40,7 @@ GENERATE_BRIEF_NOW
 followed by a JSON object containing all collected information:
 {"projectName":"...","description":"...","purpose":"...","budget":"...","targetWeight":"...","loads":"...","environment":"...","manufacturing":"...","materials":"...","timeline":"...","sizeConstraints":"...","regulations":"...","specialRequirements":"..."}
 
-IMPORTANT: Do NOT mention AI models, APIs, or providers. You are Dynaxor's internal engineering system.`;
+IMPORTANT: Do NOT mention AI models, APIs, or providers. You are Lumexa's internal engineering system.`;
     } else if (mode === "generate_parts") {
       systemPrompt = `Based on this engineering brief: ${JSON.stringify(briefData)}
 Generate a complete parts list for building this project. For each part provide all details needed.

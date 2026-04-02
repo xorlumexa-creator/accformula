@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Rocket } from 'lucide-react';
-import dynaxorLogo from '@/assets/dynaxor-logo.webp';
+import lumexaLogo from '@/assets/lumexa-logo.webp';
 
 const categories = [
   'Robot', 'IoT Device', 'Car / Automotive', 'Drone', 'Industrial Machine',
@@ -44,7 +44,7 @@ export default function OnboardingPage() {
         ...form,
       });
       if (error) throw error;
-      toast({ title: 'Project created! Welcome to Dynaxor.' });
+      toast({ title: 'Project created! Welcome to Lumexa.' });
       navigate('/');
     } catch (err: any) {
       toast({ title: err.message, variant: 'destructive' });
@@ -57,10 +57,10 @@ export default function OnboardingPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-lg border-border/50 bg-card/80 backdrop-blur-xl">
         <CardHeader className="items-center text-center space-y-3">
-          <img src={dynaxorLogo} alt="Dynaxor" className="w-16 h-16 rounded-2xl object-cover" />
+          <img src={lumexaLogo} alt="Lumexa" className="w-16 h-16 rounded-2xl object-cover" />
           <div>
             <CardTitle className="text-2xl">What project are you building?</CardTitle>
-            <CardDescription>Tell us about your project so Dynaxor can assist you better.</CardDescription>
+            <CardDescription>Tell us about your project so Lumexa can assist you better.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>

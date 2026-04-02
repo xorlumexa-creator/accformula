@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Sparkles } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import dynaxorLogo from '@/assets/dynaxor-logo.webp';
+import lumexaLogo from '@/assets/lumexa-logo.webp';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -68,8 +68,8 @@ export default function AppLayout() {
         {/* Panel Header */}
         <div className="flex items-center justify-between p-5 border-b border-border/30">
           <div className="flex items-center gap-3">
-            <img src={dynaxorLogo} alt="Dynaxor" className="w-10 h-10 rounded-lg object-cover" />
-            <span className="text-lg font-bold tracking-tight font-display text-gradient">DYNAXOR</span>
+            <img src={lumexaLogo} alt="Lumexa" className="w-10 h-10 rounded-lg object-cover" />
+            <span className="text-lg font-bold tracking-tight font-display text-gradient">LUMEXA</span>
           </div>
           <button onClick={() => setMenuOpen(false)} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />

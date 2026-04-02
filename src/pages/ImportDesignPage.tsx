@@ -419,7 +419,7 @@ export default function ImportDesignPage() {
       const faceCount = pg?.face_count || stlData?.triangleCount || 0;
       const selectedMat = MATERIALS[selectedMaterial];
 
-      let userContent = `You are Dynaxor Engineering AI analyzing a 3D mechanical design.
+      let userContent = `You are Lumexa Engineering AI analyzing a 3D mechanical design.
 
 USER PROJECT CONTEXT:
 What they are building: ${project?.purpose || project?.project_name || 'Not specified'}
@@ -1213,7 +1213,7 @@ Minimum 3 annotations maximum 8. Spread across different positions.`;
 
       {/* Disclaimer */}
       <p className="text-[10px] text-muted-foreground/40 text-center max-w-xl mx-auto">
-        Dynaxor CAD Analysis uses AI-powered interpretation. Annotations are placed via position hints on the 3D bounding box. Not a substitute for certified FEA simulation.
+        Lumexa CAD Analysis uses AI-powered interpretation. Annotations are placed via position hints on the 3D bounding box. Not a substitute for certified FEA simulation.
       </p>
 
       {/* Heat Stress Modal */}

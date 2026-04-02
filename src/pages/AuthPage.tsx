@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, MapPin, Loader2 } from 'lucide-react';
-import dynaxorLogo from '@/assets/dynaxor-logo.webp';
+import lumexaLogo from '@/assets/lumexa-logo.webp';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -77,13 +77,13 @@ export default function AuthPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md border-border/50 bg-card/80 backdrop-blur-xl">
         <CardHeader className="items-center text-center space-y-4">
-          <img src={dynaxorLogo} alt="Dynaxor" className="w-20 h-20 rounded-2xl object-cover" />
+          <img src={lumexaLogo} alt="Lumexa" className="w-20 h-20 rounded-2xl object-cover" />
           <div>
             <CardTitle className="text-2xl tracking-tight">
               {isLogin ? 'Welcome back' : 'Create your account'}
             </CardTitle>
             <CardDescription>
-              {isLogin ? 'Sign in to your Dynaxor workspace' : 'Start building with Dynaxor'}
+              {isLogin ? 'Sign in to your Lumexa workspace' : 'Start building with Lumexa'}
             </CardDescription>
           </div>
         </CardHeader>

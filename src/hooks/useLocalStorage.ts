@@ -40,10 +40,10 @@ export interface UserProfile {
 
 // ─── Keys ───
 const KEYS = {
-  telemetry: 'dynaxor_telemetry_attempts',
-  designs: 'dynaxor_design_analyses',
-  chat: 'dynaxor_chat_history',
-  profile: 'dynaxor_user_profile',
+  telemetry: 'lumexa_telemetry_attempts',
+  designs: 'lumexa_design_analyses',
+  chat: 'lumexa_chat_history',
+  profile: 'lumexa_user_profile',
 } as const;
 
 const MAX_TELEMETRY = 30;

@@ -156,7 +156,7 @@ export default function DashboardPage() {
             <Activity className="w-10 h-10 text-primary animate-pulse" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold mb-2">Welcome to Dynaxor</h2>
+            <h2 className="text-2xl font-bold mb-2">Welcome to Lumexa</h2>
             <p className="text-muted-foreground max-w-md">
               Upload telemetry data or import a 3D design to get started with AI-powered engineering analysis.
             </p>
