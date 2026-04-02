@@ -1,264 +1,250 @@
 import { useEffect, useState } from 'react';
-import { useTelemetry } from '@/context/TelemetryContext';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
-import { useTelemetryAttempts, useDesignAnalyses, type TelemetryAttempt, type DesignAnalysis } from '@/hooks/useLocalStorage';
-import MetricCard from '@/components/MetricCard';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Gauge, Zap, Thermometer, Clock, Database, Activity,
-  Upload, FileInput, MessageSquare, Timer, Search, BarChart3, Eye, X
+  Flame, Plus, CheckCircle2, Circle, ArrowRight, Clock,
+  FileInput, MessageSquare, Timer, Upload, Microscope, Sparkles, Search
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import ReactMarkdown from 'react-markdown';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 
-const navCards = [
-  { to: '/upload', icon: Upload, label: 'Sensor Telemetry', desc: 'Import CSV / telemetry files' },
-  { to: '/import-design', icon: FileInput, label: 'Insert Design', desc: 'CAD data & analysis' },
-  { to: '/assembly', icon: Search, label: 'Inspector', desc: 'Assembly inspection' },
-  { to: '/chat', icon: MessageSquare, label: 'AI Chat', desc: 'Engineering assistant' },
-  { to: '/lap-calculator', icon: Timer, label: 'Lap Calculator', desc: 'Track lap times' },
-];
+const phases = ['Planning', 'Design', 'Analysis', 'Code', 'Assembly', 'Testing'];
+
+interface Project {
+  id: string;
+  project_name: string;
+  description: string;
+  category: string;
+  current_phase: number;
+  progress_percent: number;
+}
+
+interface Task {
+  id: string;
+  task_number: number;
+  title: string;
+  estimated_hours: number;
+  status: string;
+  phase: number;
+}
+
+interface Streak {
+  current_streak: number;
+  longest_streak: number;
+  last_active_date: string | null;
+}
 
 export default function DashboardPage() {
-  const { data, stats, fileName, sessions, loadSession } = useTelemetry();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [hasProject, setHasProject] = useState<boolean | null>(null);
-  const { attempts } = useTelemetryAttempts();
-  const { analyses } = useDesignAnalyses();
-  const [telPage, setTelPage] = useState(0);
-  const [viewAttempt, setViewAttempt] = useState<TelemetryAttempt | null>(null);
-  const [viewDesign, setViewDesign] = useState<DesignAnalysis | null>(null);
-
-  const PER_PAGE = 10;
+  const [profile, setProfile] = useState<any>(null);
+  const [project, setProject] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [streak, setStreak] = useState<Streak>({ current_streak: 0, longest_streak: 0, last_active_date: null });
+  const [loading, setLoading] = useState(true);
+  const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!user) return;
-    supabase.from('projects').select('id').eq('user_id', user.id).limit(1)
-      .then(({ data: p }) => {
-        if (!p || p.length === 0) {
-          navigate('/onboarding', { replace: true });
-        } else {
-          setHasProject(true);
-        }
-      });
-  }, [user, navigate]);
+    loadData();
+  }, [user]);
 
-  if (hasProject === null) {
+  const loadData = async () => {
+    if (!user) return;
+
+    // Check if profile is filled (onboarding complete)
+    const { data: profileData } = await supabase.from('profiles')
+      .select('*').eq('user_id', user.id).single();
+
+    if (!profileData?.country) {
+      navigate('/onboarding', { replace: true });
+      return;
+    }
+    setProfile(profileData);
+    setHasOnboarded(true);
+
+    // Load active project
+    const { data: projects } = await supabase.from('projects')
+      .select('*').eq('user_id', user.id)
+      .order('created_at', { ascending: false }).limit(1);
+
+    if (projects?.[0]) {
+      setProject(projects[0] as Project);
+
+      // Load tasks
+      const { data: taskData } = await supabase.from('project_tasks')
+        .select('*').eq('project_id', projects[0].id)
+        .order('sort_order', { ascending: true });
+      if (taskData) setTasks(taskData as Task[]);
+    }
+
+    // Load streak
+    const { data: streakData } = await supabase.from('user_streaks')
+      .select('*').eq('user_id', user.id).single();
+    if (streakData) setStreak(streakData as Streak);
+
+    // Update streak for today
+    await updateStreak();
+    setLoading(false);
+  };
+
+  const updateStreak = async () => {
+    if (!user) return;
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: existing } = await supabase.from('user_streaks')
+      .select('*').eq('user_id', user.id).single();
+
+    if (!existing) {
+      await supabase.from('user_streaks').insert({
+        user_id: user.id, current_streak: 1, longest_streak: 1, last_active_date: today,
+      });
+      setStreak({ current_streak: 1, longest_streak: 1, last_active_date: today });
+      return;
+    }
+
+    if (existing.last_active_date === today) return; // Already logged today
+
+    const lastDate = existing.last_active_date ? new Date(existing.last_active_date) : null;
+    const todayDate = new Date(today);
+    const diffDays = lastDate ? Math.floor((todayDate.getTime() - lastDate.getTime()) / 86400000) : 999;
+
+    let newStreak = diffDays === 1 ? existing.current_streak + 1 : 1;
+    const newLongest = Math.max(newStreak, existing.longest_streak);
+
+    await supabase.from('user_streaks').update({
+      current_streak: newStreak, longest_streak: newLongest, last_active_date: today,
+    }).eq('user_id', user.id);
+
+    setStreak({ current_streak: newStreak, longest_streak: newLongest, last_active_date: today });
+  };
+
+  const toggleTask = async (taskId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'Complete' ? 'Not Started' : 'Complete';
+    await supabase.from('project_tasks').update({ status: newStatus }).eq('id', taskId);
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+
+    // Recalculate progress
+    if (project) {
+      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t);
+      const completed = updatedTasks.filter(t => t.status === 'Complete').length;
+      const progress = updatedTasks.length > 0 ? Math.round((completed / updatedTasks.length) * 100) : 0;
+      await supabase.from('projects').update({ progress_percent: progress }).eq('id', project.id);
+      setProject(p => p ? { ...p, progress_percent: progress } : null);
+    }
+  };
+
+  if (loading || hasOnboarded === null) {
     return <div className="flex items-center justify-center min-h-[60vh] text-muted-foreground">Loading...</div>;
   }
 
-  const sortedAttempts = [...attempts].reverse();
-  const pagedAttempts = sortedAttempts.slice(telPage * PER_PAGE, (telPage + 1) * PER_PAGE);
-  const totalTelPages = Math.ceil(sortedAttempts.length / PER_PAGE);
-
-  const sortedDesigns = [...analyses].reverse();
-
-  const getScoreColor = (s: number) => {
-    if (s >= 90) return 'bg-green-600';
-    if (s >= 80) return 'bg-yellow-600';
-    if (s >= 60) return 'bg-orange-600';
-    return 'bg-destructive';
-  };
-
   return (
     <div className="space-y-6 animate-slide-up">
-      {/* Navigation Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        {navCards.map(({ to, icon: Icon, label, desc }) => (
-          <Link key={to} to={to}
-            className="gradient-card rounded-lg border border-border p-4 hover:border-primary/30 hover:glow-red transition-all group cursor-pointer">
-            <Icon className="w-6 h-6 text-primary mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-sm font-semibold">{label}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
-          </Link>
-        ))}
+      {/* Welcome Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">
+            Welcome back, <span className="text-primary">{profile?.name || 'Builder'}</span>
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">Let's keep building.</p>
+        </div>
+        <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-primary/20" style={{ background: '#111111' }}>
+          <Flame className="w-5 h-5 text-orange-500" />
+          <span className="text-lg font-bold text-orange-500">{streak.current_streak}</span>
+          <span className="text-xs text-muted-foreground">day streak</span>
+        </div>
       </div>
 
-      {/* TELEMETRY ATTEMPTS SECTION */}
-      {sortedAttempts.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-lg font-bold text-primary font-display tracking-wide flex items-center gap-2">
-            <BarChart3 className="w-5 h-5" /> Telemetry Attempts
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {pagedAttempts.map(a => (
-              <div key={a.attemptNumber} className="rounded-lg border border-border/30 p-4" style={{ background: '#111111' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-primary font-bold font-display text-sm">Attempt {a.attemptNumber}</span>
-                  <span className="text-xs text-muted-foreground">{new Date(a.timestamp).toLocaleString()}</span>
-                </div>
-                <p className="text-xs text-muted-foreground italic truncate mb-3">
-                  {a.rawData.slice(0, 50)}...
-                </p>
-                <button
-                  onClick={() => setViewAttempt(a)}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30 transition-colors font-medium"
-                >
-                  Analytics
-                </button>
-              </div>
-            ))}
-          </div>
-          {/* Pagination */}
-          {totalTelPages > 1 && (
-            <div className="flex items-center justify-center gap-2">
-              {Array.from({ length: totalTelPages }, (_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setTelPage(i)}
-                  className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${i === telPage ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:bg-secondary/80'}`}
-                >
-                  {i + 1}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* DESIGN ANALYSES SECTION */}
-      {sortedDesigns.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-lg font-bold text-primary font-display tracking-wide flex items-center gap-2">
-            <FileInput className="w-5 h-5" /> Part Analyses
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {sortedDesigns.map((d, i) => (
-              <div key={i} className="rounded-lg border border-border/30 p-4" style={{ background: '#111111' }}>
-                <p className="text-primary font-bold text-lg mb-1">{d.partName}</p>
-                <p className="text-xs text-muted-foreground mb-1">{d.filename}</p>
-                <p className="text-xs text-muted-foreground mb-3">{new Date(d.timestamp).toLocaleDateString()}</p>
-                <div className="flex items-center justify-between">
-                  <Badge className={`${getScoreColor(d.designScore)} text-foreground text-xs`}>
-                    Score: {d.designScore}
-                  </Badge>
-                  <button
-                    onClick={() => setViewDesign(d)}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors font-medium"
-                  >
-                    View Analysis
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {sortedAttempts.length === 0 && sortedDesigns.length === 0 && (
-        <div className="flex flex-col items-center justify-center min-h-[40vh] text-center gap-6">
+      {/* No Project State */}
+      {!project && (
+        <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-6">
           <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Activity className="w-10 h-10 text-primary animate-pulse" />
+            <Sparkles className="w-10 h-10 text-primary animate-pulse" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold mb-2">Welcome to Lumexa</h2>
+            <h2 className="text-2xl font-bold mb-2">Welcome to Lumexa!</h2>
             <p className="text-muted-foreground max-w-md">
-              Upload telemetry data or import a 3D design to get started with AI-powered engineering analysis.
+              Start by creating your first project. Lumexa will generate a personalized build plan with parts, guides, and step-by-step instructions.
             </p>
           </div>
-          <div className="flex gap-3">
-            <Link to="/upload" className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-6 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors">
-              Upload Telemetry
-            </Link>
-            <Link to="/import-design" className="inline-flex items-center gap-2 border border-primary/30 text-primary px-6 py-2.5 rounded-lg font-medium hover:bg-primary/10 transition-colors">
-              Insert Design
+          <Button size="lg" onClick={() => navigate('/project-plan')} className="gap-2">
+            <Plus className="w-5 h-5" /> Create Project
+          </Button>
+        </div>
+      )}
+
+      {/* Active Project Card */}
+      {project && (
+        <div className="rounded-xl border border-border/30 p-5" style={{ background: '#111111' }}>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-bold">{project.project_name}</h2>
+              <p className="text-xs text-muted-foreground">{project.category} · {project.description?.slice(0, 60)}</p>
+            </div>
+            <Badge variant="outline" className="border-primary/30 text-primary">
+              Phase {project.current_phase}: {phases[(project.current_phase || 1) - 1]}
+            </Badge>
+          </div>
+          <Progress value={project.progress_percent || 0} className="h-2 mb-2" />
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">{project.progress_percent || 0}% complete</span>
+            <Link to="/parts" className="text-xs text-primary hover:underline flex items-center gap-1">
+              View Parts <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
         </div>
       )}
 
-      {/* Telemetry Attempt Modal */}
-      <Dialog open={!!viewAttempt} onOpenChange={() => setViewAttempt(null)}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-primary font-display">
-              <BarChart3 className="w-5 h-5" />
-              Attempt {viewAttempt?.attemptNumber} — {viewAttempt && new Date(viewAttempt.timestamp).toLocaleString()}
-            </DialogTitle>
-          </DialogHeader>
-          {viewAttempt && (
-            <div className="space-y-4">
-              {viewAttempt.severityCards.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Issues Found</h4>
-                  {viewAttempt.severityCards.map((c, i) => (
-                    <div key={i} className="rounded-lg border border-border/30 p-3" style={{ background: '#111111' }}>
-                      <Badge className={`text-xs mb-1 ${c.severity === 'CRITICAL' ? 'bg-destructive' : c.severity === 'HIGH' ? 'bg-orange-600' : c.severity === 'MEDIUM' ? 'bg-yellow-600' : 'bg-muted'}`}>
-                        {c.severity}
-                      </Badge>
-                      <p className="text-sm font-bold">{c.title}</p>
-                      <p className="text-xs text-muted-foreground">{c.description}</p>
-                    </div>
-                  ))}
+      {/* Task Schedule */}
+      {project && tasks.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-bold flex items-center gap-2">
+            <Clock className="w-5 h-5 text-primary" /> Task Schedule
+          </h3>
+          <div className="space-y-2">
+            {tasks.slice(0, 8).map(task => (
+              <button key={task.id} onClick={() => toggleTask(task.id, task.status)}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-border/20 hover:border-primary/20 transition-all text-left"
+                style={{ background: '#111111' }}>
+                {task.status === 'Complete'
+                  ? <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                  : <Circle className="w-5 h-5 text-muted-foreground shrink-0" />
+                }
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium ${task.status === 'Complete' ? 'line-through text-muted-foreground' : ''}`}>
+                    Task {task.task_number}: {task.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground">~{task.estimated_hours}h · Phase {task.phase}</p>
                 </div>
-              )}
-              {viewAttempt.analysisText && (
-                <div className="prose prose-sm prose-invert max-w-none">
-                  <ReactMarkdown>{viewAttempt.analysisText}</ReactMarkdown>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+              </button>
+            ))}
+            {tasks.length > 8 && (
+              <p className="text-xs text-muted-foreground text-center">+{tasks.length - 8} more tasks</p>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* Design Analysis Modal */}
-      <Dialog open={!!viewDesign} onOpenChange={() => setViewDesign(null)}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-primary font-display">
-              <FileInput className="w-5 h-5" />
-              {viewDesign?.partName} — Score: {viewDesign?.designScore}
-            </DialogTitle>
-          </DialogHeader>
-          {viewDesign && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-lg bg-secondary/50 p-3">
-                  <p className="text-muted-foreground text-xs">Filename</p>
-                  <p className="font-mono text-xs">{viewDesign.filename}</p>
-                </div>
-                <div className="rounded-lg bg-secondary/50 p-3">
-                  <p className="text-muted-foreground text-xs">Date</p>
-                  <p className="text-xs">{new Date(viewDesign.timestamp).toLocaleString()}</p>
-                </div>
-                {viewDesign.dimensions && (
-                  <div className="rounded-lg bg-secondary/50 p-3 col-span-2">
-                    <p className="text-muted-foreground text-xs">Dimensions</p>
-                    <p className="font-mono text-xs text-primary">
-                      {viewDesign.dimensions.x.toFixed(1)} × {viewDesign.dimensions.y.toFixed(1)} × {viewDesign.dimensions.z.toFixed(1)} mm
-                    </p>
-                  </div>
-                )}
-              </div>
-              {viewDesign.severityCards.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Annotations</h4>
-                  {viewDesign.severityCards.map((c, i) => (
-                    <div key={i} className="rounded-lg border border-border/30 p-3" style={{ background: '#111111' }}>
-                      <Badge className={`text-xs mb-1 ${c.severity === 'CRITICAL' ? 'bg-destructive' : c.severity === 'HIGH' ? 'bg-orange-600' : c.severity === 'MEDIUM' ? 'bg-yellow-600' : 'bg-muted'}`}>
-                        {c.severity}
-                      </Badge>
-                      <p className="text-sm font-bold">{c.title}</p>
-                      <p className="text-xs text-muted-foreground">{c.description}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {viewDesign.analysisText && (
-                <div className="prose prose-sm prose-invert max-w-none">
-                  <ReactMarkdown>{viewDesign.analysisText.replace(/```annotations-json[\s\S]*?```/g, '').trim()}</ReactMarkdown>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Quick Nav */}
+      {project && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { to: '/parts', icon: FileInput, label: 'Parts & Materials' },
+            { to: '/import-design', icon: Search, label: 'CAD Analysis' },
+            { to: '/chat', icon: MessageSquare, label: 'AI Coach' },
+            { to: '/upload', icon: Upload, label: 'Telemetry' },
+          ].map(({ to, icon: Icon, label }) => (
+            <Link key={to} to={to}
+              className="flex items-center gap-2 p-3 rounded-lg border border-border/20 hover:border-primary/20 transition-all"
+              style={{ background: '#111111' }}>
+              <Icon className="w-4 h-4 text-primary" />
+              <span className="text-sm">{label}</span>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
