@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Code2, ChevronDown, ChevronUp, CheckCircle2, Circle, Loader2, Copy, Terminal, AlertCircle } from 'lucide-react';
+import { Code2, ChevronDown, ChevronUp, CheckCircle2, Circle, Loader2, Terminal, AlertCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 
@@ -23,6 +23,12 @@ interface Module {
   status: 'locked' | 'available' | 'complete';
 }
 
+interface HardwareOption {
+  label: string;
+  price: string;
+  description: string;
+}
+
 export default function CodeSectionPage() {
   const { user } = useAuth();
   const [project, setProject] = useState<any>(null);
@@ -34,6 +40,10 @@ export default function CodeSectionPage() {
   const [generating, setGenerating] = useState(false);
   const [generatingModule, setGeneratingModule] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Hardware confirmation
+  const [showHardwareConfirm, setShowHardwareConfirm] = useState(false);
+  const [hardwareSelections, setHardwareSelections] = useState<Record<string, string>>({});
+  const [pendingModuleId, setPendingModuleId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -61,7 +71,7 @@ export default function CodeSectionPage() {
 
 Platform: ${platform}
 User level: ${profile?.experience_level || 'beginner'}
-Electronics: ${electronics.map(e => e.component_name).join(', ') || 'Not specified'}
+Electronics: ${electronics.map(e => `${e.component_name} (${e.model_recommendation})`).join(', ') || 'Not specified'}
 Microcontroller: ${project.microcontroller || 'Not specified'}
 
 Return EXACTLY a JSON array of 5-7 modules. Each module:
@@ -94,6 +104,51 @@ Return ONLY the JSON array, no markdown fences.`;
     setGenerating(false);
   };
 
+  const isSensorModule = (mod: Module) => {
+    const t = (mod.title + ' ' + mod.description).toLowerCase();
+    return t.includes('sensor') || t.includes('imu') || t.includes('gps') || t.includes('accelerometer') || t.includes('gyro') || t.includes('lidar') || t.includes('ultrasonic');
+  };
+
+  const getHardwareOptions = (): { component: string; options: HardwareOption[] }[] => {
+    const sensorElectronics = electronics.filter(e => {
+      const p = (e.purpose || '').toLowerCase();
+      const n = (e.component_name || '').toLowerCase();
+      return p.includes('sensor') || p.includes('imu') || p.includes('gps') || n.includes('sensor') || n.includes('imu') || n.includes('gps') || n.includes('accelerometer') || n.includes('lidar');
+    });
+
+    return sensorElectronics.map(e => ({
+      component: e.component_name,
+      options: [
+        { label: e.model_recommendation || e.component_name, price: `$${e.price || '?'}`, description: 'Recommended in your parts list' },
+        { label: 'Other (I have a different model)', price: '', description: 'Type your exact model below' },
+      ]
+    }));
+  };
+
+  const handleModuleClick = (moduleId: number) => {
+    const mod = modules.find(m => m.id === moduleId);
+    if (!mod || mod.status === 'locked') return;
+
+    if (mod.guide) { setExpandedModule(moduleId); return; }
+
+    // Check if this is module 2 (sensor) and needs hardware confirmation
+    if (isSensorModule(mod) && Object.keys(hardwareSelections).length === 0) {
+      const hwOptions = getHardwareOptions();
+      if (hwOptions.length > 0) {
+        setPendingModuleId(moduleId);
+        setShowHardwareConfirm(true);
+        return;
+      }
+    }
+
+    generateModuleGuide(moduleId);
+  };
+
+  const confirmHardwareAndGenerate = () => {
+    setShowHardwareConfirm(false);
+    if (pendingModuleId) generateModuleGuide(pendingModuleId);
+  };
+
   const generateModuleGuide = async (moduleId: number) => {
     const mod = modules.find(m => m.id === moduleId);
     if (!mod || mod.guide) { setExpandedModule(moduleId); return; }
@@ -101,22 +156,43 @@ Return ONLY the JSON array, no markdown fences.`;
     setGeneratingModule(moduleId);
     setExpandedModule(moduleId);
     try {
-      const systemPrompt = `You are Lumexa's coding tutor. Generate a baby-step code guide for Module: "${mod.title}" — ${mod.description}.
+      const hwContext = Object.entries(hardwareSelections).length > 0
+        ? `\n\nCONFIRMED HARDWARE:\n${Object.entries(hardwareSelections).map(([k, v]) => `- ${k}: ${v}`).join('\n')}`
+        : '';
 
-Platform: ${platform}
-Project: ${project?.project_name} — ${project?.description}
-Electronics: ${electronics.map(e => `${e.component_name} (${e.model_recommendation})`).join(', ')}
-Microcontroller: ${project?.microcontroller || 'Not specified'}
-User level: ${profile?.experience_level || 'beginner'}
+      const systemPrompt = `You are an expert embedded systems engineer and coding tutor for Lumexa.
 
-Format:
-1. What file to create/open
-2. Exact code block (formatted, with copy button markers)
-3. Where to paste it
-4. What each line does (brief)
-5. Test command and expected output
+CRITICAL RULES:
+- Write ONLY real working code
+- No placeholder functions
+- No random() substitutes for sensor data
+- No fake simulations
+- Every include statement must be a real library
+- Every function must do what it claims
 
-Use numbered steps. Each step: Action → Why → Expected Result.
+Before writing code for any sensor or component, use the exact component model from the parts list. If the component is too specialized or expensive for a hobbyist, suggest an affordable alternative that does the same job.
+
+User context:
+- Project: ${project?.project_name}
+- Description: ${project?.description}
+- Parts list: ${electronics.map(e => `${e.component_name} (${e.model_recommendation})`).join(', ')}
+- Platform: ${platform}
+- Experience level: ${profile?.experience_level || 'beginner'}
+- Microcontroller: ${project?.microcontroller || 'Not specified'}${hwContext}
+
+Current module: "${mod.title}" — ${mod.description}
+
+Format each step exactly like this:
+
+Step N: [Clear title]
+Action: [Exactly what to do]
+Why: [Why this step matters]
+Code: [Complete compilable code block]
+Where to paste: [Exact location in file]
+What each line does: [Every line explained simply]
+Test: [How to verify it works]
+Expected output: [Exact text that should appear]
+
 Never use LaTeX. Use Unicode: σ ε τ Δ π ≈ ² ³ √ × ° μ
 Keep language at ${profile?.experience_level || 'beginner'} level.`;
 
@@ -126,6 +202,7 @@ Keep language at ${profile?.experience_level || 'beginner'} level.`;
         body: JSON.stringify({
           messages: [{ role: 'user', content: `Generate step-by-step code guide for: ${mod.title}` }],
           systemOverride: systemPrompt,
+          useModel: 'google/gemini-2.5-pro',
         }),
       });
       if (!resp.ok) throw new Error('Failed');
@@ -184,6 +261,42 @@ Keep language at ${profile?.experience_level || 'beginner'} level.`;
         </div>
       )}
 
+      {/* Hardware Confirmation Modal */}
+      {showHardwareConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="rounded-xl border border-border/30 p-6 max-w-md w-full space-y-4" style={{ background: '#111111' }}>
+            <h2 className="text-lg font-bold text-primary">🔧 Confirm Your Hardware</h2>
+            <p className="text-sm text-muted-foreground">Before generating sensor code, confirm which components you actually have:</p>
+            {getHardwareOptions().map(hw => (
+              <div key={hw.component} className="space-y-2">
+                <label className="text-sm font-medium">{hw.component}</label>
+                {hw.options.map(opt => (
+                  <button key={opt.label} onClick={() => setHardwareSelections(prev => ({ ...prev, [hw.component]: opt.label }))}
+                    className={`w-full text-left p-3 rounded-lg border text-sm transition-all ${hardwareSelections[hw.component] === opt.label ? 'border-primary bg-primary/10' : 'border-border/30 hover:border-primary/30'}`}>
+                    <span className="font-medium">{opt.label}</span>
+                    {opt.price && <span className="text-primary ml-2">{opt.price}</span>}
+                    <p className="text-xs text-muted-foreground">{opt.description}</p>
+                  </button>
+                ))}
+                {hardwareSelections[hw.component] === 'Other (I have a different model)' && (
+                  <input type="text" placeholder="Type your exact model..."
+                    className="w-full p-2 rounded-lg border border-border/30 bg-background text-sm"
+                    onChange={e => setHardwareSelections(prev => ({ ...prev, [hw.component]: e.target.value || 'Other' }))} />
+                )}
+              </div>
+            ))}
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" onClick={() => { setShowHardwareConfirm(false); if (pendingModuleId) generateModuleGuide(pendingModuleId); }} className="flex-1">
+                Skip
+              </Button>
+              <Button onClick={confirmHardwareAndGenerate} className="flex-1">
+                Confirm & Generate
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modules.length > 0 && (
         <>
           <div className="rounded-xl border border-border/30 p-4" style={{ background: '#111111' }}>
@@ -197,7 +310,7 @@ Keep language at ${profile?.experience_level || 'beginner'} level.`;
           <div className="space-y-3">
             {modules.map(mod => (
               <div key={mod.id} className="rounded-xl border border-border/30 overflow-hidden" style={{ background: '#111111' }}>
-                <button onClick={() => mod.status !== 'locked' ? generateModuleGuide(mod.id) : null}
+                <button onClick={() => handleModuleClick(mod.id)}
                   className={`w-full flex items-center gap-3 p-4 text-left transition-all ${mod.status === 'locked' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-secondary/20'}`}>
                   {mod.status === 'complete' ? <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" /> :
                     mod.status === 'available' ? <Circle className="w-5 h-5 text-primary shrink-0" /> :
@@ -213,7 +326,7 @@ Keep language at ${profile?.experience_level || 'beginner'} level.`;
                   <div className="border-t border-border/20 p-4">
                     {generatingModule === mod.id ? (
                       <div className="flex items-center gap-2 text-muted-foreground py-6 justify-center">
-                        <Loader2 className="w-5 h-5 animate-spin" /> Generating guide...
+                        <Loader2 className="w-5 h-5 animate-spin" /> Generating guide with Gemini Pro...
                       </div>
                     ) : mod.guide ? (
                       <>
@@ -221,11 +334,9 @@ Keep language at ${profile?.experience_level || 'beginner'} level.`;
                           <ReactMarkdown>{mod.guide}</ReactMarkdown>
                         </div>
                         {mod.status !== 'complete' && (
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={() => markComplete(mod.id)} className="gap-2">
-                              <CheckCircle2 className="w-4 h-4" /> Mark Complete
-                            </Button>
-                          </div>
+                          <Button size="sm" onClick={() => markComplete(mod.id)} className="gap-2">
+                            <CheckCircle2 className="w-4 h-4" /> Mark Complete
+                          </Button>
                         )}
                       </>
                     ) : null}
@@ -238,7 +349,7 @@ Keep language at ${profile?.experience_level || 'beginner'} level.`;
       )}
 
       <p className="text-xs text-muted-foreground text-center">
-        Code guides are AI-generated and should be reviewed before use in production.
+        Code guides are AI-generated using Gemini Pro and should be reviewed before use in production.
       </p>
     </div>
   );

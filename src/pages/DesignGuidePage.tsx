@@ -5,13 +5,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
-  ArrowLeft, Loader2, Bot, Send, AlertTriangle, CheckCircle2, Wrench
+  ArrowLeft, Loader2, Bot, Send, AlertTriangle, Wrench
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
 export default function DesignGuidePage() {
   const { partId } = useParams<{ partId: string }>();
@@ -21,6 +23,8 @@ export default function DesignGuidePage() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [detailImage, setDetailImage] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -47,12 +51,40 @@ export default function DesignGuidePage() {
     const { data: profData } = await supabase.from('profiles').select('*').eq('user_id', user.id).single();
     setProfile(profData);
 
-    // Generate design guide if not exists
+    // Generate detail image
+    if (partData.image_url) {
+      setDetailImage(partData.image_url);
+    } else {
+      generateDetailImage(partData, projData);
+    }
+
     if (!partData.design_guide) {
       await generateDesignGuide(partData, projData, profData);
     }
 
     setLoading(false);
+  };
+
+  const generateDetailImage = async (partData: any, projData: any) => {
+    setImageLoading(true);
+    try {
+      const prompt = `Technical engineering illustration of ${partData.part_name}: Material: ${partData.material}. Show key dimensions, isometric view, dark background, clean lines, engineering drawing style, show assembly interfaces, professional render, high detail, studio lighting.`;
+      const resp = await fetch(IMAGE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+        body: JSON.stringify({ prompt }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.imageUrl) {
+          setDetailImage(data.imageUrl);
+          await supabase.from('project_parts').update({ image_url: data.imageUrl } as any).eq('id', partData.id);
+        }
+      }
+    } catch (e) {
+      console.error('Detail image failed:', e);
+    }
+    setImageLoading(false);
   };
 
   const generateDesignGuide = async (partData: any, projData: any, profData: any) => {
@@ -85,32 +117,7 @@ Never use LaTeX. Use Unicode symbols: σ ε τ Δ π ≈ ² ³ √ × ° μ`;
       });
 
       if (!resp.ok) throw new Error('Failed to generate guide');
-
-      const reader = resp.body!.getReader();
-      const decoder = new TextDecoder();
-      let full = '';
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf('\n')) !== -1) {
-          let line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (!line.startsWith('data: ')) continue;
-          const json = line.slice(6).trim();
-          if (json === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(json);
-            const c = parsed.choices?.[0]?.delta?.content;
-            if (c) full += c;
-          } catch {}
-        }
-      }
-
+      const full = await streamToText(resp);
       await supabase.from('project_parts').update({ design_guide: full }).eq('id', partData.id);
       setPart((p: any) => ({ ...p, design_guide: full }));
     } catch (e) {
@@ -197,7 +204,20 @@ Never use LaTeX. Use Unicode symbols: σ ε τ Δ π ≈ ² ³ √ × ° μ`;
         <Badge variant="outline" className="border-primary/30 text-primary">{part.status}</Badge>
       </div>
 
-      {/* Fix Guide (shown if exists) */}
+      {/* Detail Image */}
+      <div className="rounded-xl border border-border/30 overflow-hidden" style={{ background: '#0a0a0a' }}>
+        {imageLoading ? (
+          <Skeleton className="w-full h-56" />
+        ) : detailImage ? (
+          <img src={detailImage} alt={part.part_name} className="w-full h-56 object-contain" />
+        ) : (
+          <div className="w-full h-32 flex items-center justify-center text-muted-foreground/30 text-sm">
+            Image generating...
+          </div>
+        )}
+      </div>
+
+      {/* Fix Guide */}
       {part.fix_guide && (
         <div className="rounded-xl border border-orange-500/30 p-5" style={{ background: '#111111' }}>
           <div className="flex items-center gap-2 mb-3">
@@ -255,4 +275,26 @@ Never use LaTeX. Use Unicode symbols: σ ε τ Δ π ≈ ² ³ √ × ° μ`;
       </div>
     </div>
   );
+}
+
+async function streamToText(resp: Response): Promise<string> {
+  const reader = resp.body!.getReader();
+  const decoder = new TextDecoder();
+  let full = '', buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n')) !== -1) {
+      let line = buf.slice(0, idx);
+      buf = buf.slice(idx + 1);
+      if (line.endsWith('\r')) line = line.slice(0, -1);
+      if (!line.startsWith('data: ')) continue;
+      const json = line.slice(6).trim();
+      if (json === '[DONE]') break;
+      try { const p = JSON.parse(json); const c = p.choices?.[0]?.delta?.content; if (c) full += c; } catch {}
+    }
+  }
+  return full;
 }
