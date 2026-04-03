@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Rocket, Box } from 'lucide-react';
+import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Rocket, Box, Code2, Cpu, CreditCard } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import lumexaLogo from '@/assets/lumexa-logo.webp';
 
