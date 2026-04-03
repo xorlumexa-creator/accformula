@@ -19,6 +19,9 @@ import ProjectPlanPage from "./pages/ProjectPlanPage";
 import PartsPage from "./pages/PartsPage";
 import DesignGuidePage from "./pages/DesignGuidePage";
 import NotFound from "./pages/NotFound";
+import CodeSectionPage from "./pages/CodeSectionPage";
+import ICWirePage from "./pages/ICWirePage";
+import PricingPage from "./pages/PricingPage";
 
 const queryClient = new QueryClient();
 
