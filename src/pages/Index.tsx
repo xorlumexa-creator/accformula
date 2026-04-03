@@ -4,13 +4,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Flame, Plus, CheckCircle2, Circle, ArrowRight, Clock,
-  FileInput, MessageSquare, Timer, Upload, Microscope, Sparkles, Search
+  FileInput, MessageSquare, Upload, Sparkles, Search
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const phases = ['Planning', 'Design', 'Analysis', 'Code', 'Assembly', 'Testing'];
+const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
 interface Project {
   id: string;
@@ -19,6 +21,7 @@ interface Project {
   category: string;
   current_phase: number;
   progress_percent: number;
+  hero_image_url?: string;
 }
 
 interface Task {
@@ -45,6 +48,7 @@ export default function DashboardPage() {
   const [streak, setStreak] = useState<Streak>({ current_streak: 0, longest_streak: 0, last_active_date: null });
   const [loading, setLoading] = useState(true);
   const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
+  const [heroLoading, setHeroLoading] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -53,8 +57,6 @@ export default function DashboardPage() {
 
   const loadData = async () => {
     if (!user) return;
-
-    // Check if profile is filled (onboarding complete)
     const { data: profileData } = await supabase.from('profiles')
       .select('*').eq('user_id', user.id).single();
 
@@ -65,7 +67,6 @@ export default function DashboardPage() {
     setProfile(profileData);
     setHasOnboarded(true);
 
-    // Load active project
     const { data: projects } = await supabase.from('projects')
       .select('*').eq('user_id', user.id)
       .order('created_at', { ascending: false }).limit(1);
@@ -73,27 +74,50 @@ export default function DashboardPage() {
     if (projects?.[0]) {
       setProject(projects[0] as Project);
 
-      // Load tasks
       const { data: taskData } = await supabase.from('project_tasks')
         .select('*').eq('project_id', projects[0].id)
         .order('sort_order', { ascending: true });
       if (taskData) setTasks(taskData as Task[]);
+
+      // Generate hero image if missing
+      if (!projects[0].hero_image_url) {
+        generateHeroImage(projects[0]);
+      }
     }
 
-    // Load streak
     const { data: streakData } = await supabase.from('user_streaks')
       .select('*').eq('user_id', user.id).single();
     if (streakData) setStreak(streakData as Streak);
 
-    // Update streak for today
     await updateStreak();
     setLoading(false);
+  };
+
+  const generateHeroImage = async (proj: any) => {
+    setHeroLoading(true);
+    try {
+      const prompt = `Photorealistic engineering render of ${proj.project_name}: ${proj.description}. Professional product photography, dark background, all components assembled, technical illustration style, high detail, studio lighting.`;
+      const resp = await fetch(IMAGE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+        body: JSON.stringify({ prompt }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.imageUrl) {
+          await supabase.from('projects').update({ hero_image_url: data.imageUrl } as any).eq('id', proj.id);
+          setProject(p => p ? { ...p, hero_image_url: data.imageUrl } : null);
+        }
+      }
+    } catch (e) {
+      console.error('Hero image generation failed:', e);
+    }
+    setHeroLoading(false);
   };
 
   const updateStreak = async () => {
     if (!user) return;
     const today = new Date().toISOString().split('T')[0];
-
     const { data: existing } = await supabase.from('user_streaks')
       .select('*').eq('user_id', user.id).single();
 
@@ -104,20 +128,15 @@ export default function DashboardPage() {
       setStreak({ current_streak: 1, longest_streak: 1, last_active_date: today });
       return;
     }
-
-    if (existing.last_active_date === today) return; // Already logged today
-
+    if (existing.last_active_date === today) return;
     const lastDate = existing.last_active_date ? new Date(existing.last_active_date) : null;
     const todayDate = new Date(today);
     const diffDays = lastDate ? Math.floor((todayDate.getTime() - lastDate.getTime()) / 86400000) : 999;
-
     let newStreak = diffDays === 1 ? existing.current_streak + 1 : 1;
     const newLongest = Math.max(newStreak, existing.longest_streak);
-
     await supabase.from('user_streaks').update({
       current_streak: newStreak, longest_streak: newLongest, last_active_date: today,
     }).eq('user_id', user.id);
-
     setStreak({ current_streak: newStreak, longest_streak: newLongest, last_active_date: today });
   };
 
@@ -125,8 +144,6 @@ export default function DashboardPage() {
     const newStatus = currentStatus === 'Complete' ? 'Not Started' : 'Complete';
     await supabase.from('project_tasks').update({ status: newStatus }).eq('id', taskId);
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-
-    // Recalculate progress
     if (project) {
       const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t);
       const completed = updatedTasks.filter(t => t.status === 'Complete').length;
@@ -175,24 +192,34 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Active Project Card */}
+      {/* Hero Image + Active Project Card */}
       {project && (
-        <div className="rounded-xl border border-border/30 p-5" style={{ background: '#111111' }}>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-lg font-bold">{project.project_name}</h2>
-              <p className="text-xs text-muted-foreground">{project.category} · {project.description?.slice(0, 60)}</p>
+        <div className="rounded-xl border border-border/30 overflow-hidden" style={{ background: '#111111' }}>
+          {/* Hero Image */}
+          {heroLoading ? (
+            <Skeleton className="w-full h-48 rounded-none" />
+          ) : project.hero_image_url ? (
+            <img src={project.hero_image_url} alt={project.project_name}
+              className="w-full h-48 object-cover" />
+          ) : null}
+
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-lg font-bold">{project.project_name}</h2>
+                <p className="text-xs text-muted-foreground">{project.category} · {project.description?.slice(0, 60)}</p>
+              </div>
+              <Badge variant="outline" className="border-primary/30 text-primary">
+                Phase {project.current_phase}: {phases[(project.current_phase || 1) - 1]}
+              </Badge>
             </div>
-            <Badge variant="outline" className="border-primary/30 text-primary">
-              Phase {project.current_phase}: {phases[(project.current_phase || 1) - 1]}
-            </Badge>
-          </div>
-          <Progress value={project.progress_percent || 0} className="h-2 mb-2" />
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">{project.progress_percent || 0}% complete</span>
-            <Link to="/parts" className="text-xs text-primary hover:underline flex items-center gap-1">
-              View Parts <ArrowRight className="w-3 h-3" />
-            </Link>
+            <Progress value={project.progress_percent || 0} className="h-2 mb-2" />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{project.progress_percent || 0}% complete</span>
+              <Link to="/parts" className="text-xs text-primary hover:underline flex items-center gap-1">
+                View Parts <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
           </div>
         </div>
       )}

@@ -4,13 +4,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { Link, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Box, Cpu, CheckCircle2, Circle, ShoppingCart, ArrowRight, DollarSign
+  Box, CheckCircle2, Circle, ArrowRight, DollarSign
 } from 'lucide-react';
+
+const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
 interface Part {
   id: string; part_name: string; material: string; manufacturing_method: string;
   estimated_cost: number; complexity: string; status: string; sort_order: number;
+  image_url?: string;
 }
 
 interface Electronic {
@@ -37,6 +41,7 @@ export default function PartsPage() {
   const [parts, setParts] = useState<Part[]>([]);
   const [electronics, setElectronics] = useState<Electronic[]>([]);
   const [project, setProject] = useState<any>(null);
+  const [generatingImages, setGeneratingImages] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user) return;
@@ -53,11 +58,39 @@ export default function PartsPage() {
 
     const { data: partsData } = await supabase.from('project_parts')
       .select('*').eq('project_id', projects[0].id).order('sort_order', { ascending: true });
-    if (partsData) setParts(partsData as Part[]);
+    if (partsData) {
+      setParts(partsData as Part[]);
+      // Generate thumbnails for parts missing images (lazy, first 3 immediately)
+      const needImages = (partsData as Part[]).filter(p => !p.image_url).slice(0, 3);
+      needImages.forEach(p => generatePartImage(p, projects[0]));
+    }
 
     const { data: elecData } = await supabase.from('project_electronics')
       .select('*').eq('project_id', projects[0].id).order('sort_order', { ascending: true });
     if (elecData) setElectronics(elecData as Electronic[]);
+  };
+
+  const generatePartImage = async (part: Part, proj: any) => {
+    if (generatingImages.has(part.id)) return;
+    setGeneratingImages(prev => new Set(prev).add(part.id));
+    try {
+      const prompt = `Technical engineering render of ${part.part_name} made from ${part.material} for a ${proj.project_name}. Isometric view, dark background, clear geometric features, professional render, studio lighting, high detail.`;
+      const resp = await fetch(IMAGE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+        body: JSON.stringify({ prompt }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.imageUrl) {
+          await supabase.from('project_parts').update({ image_url: data.imageUrl } as any).eq('id', part.id);
+          setParts(prev => prev.map(p => p.id === part.id ? { ...p, image_url: data.imageUrl } : p));
+        }
+      }
+    } catch (e) {
+      console.error('Part image generation failed:', e);
+    }
+    setGeneratingImages(prev => { const s = new Set(prev); s.delete(part.id); return s; });
   };
 
   const toggleElectronicStatus = async (id: string, current: string) => {
@@ -100,19 +133,33 @@ export default function PartsPage() {
         <div className="space-y-2">
           {parts.map(part => (
             <Link key={part.id} to={`/design-guide/${part.id}`}
-              className="block p-4 rounded-lg border border-border/20 hover:border-primary/20 transition-all"
+              className="flex items-center gap-3 p-4 rounded-lg border border-border/20 hover:border-primary/20 transition-all"
               style={{ background: '#111111' }}>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-medium">{part.part_name}</h3>
-                <Badge variant="outline" className={statusColors[part.status] || ''}>
-                  {part.status}
-                </Badge>
+              {/* Thumbnail */}
+              <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 border border-border/20" style={{ background: '#0a0a0a' }}>
+                {generatingImages.has(part.id) ? (
+                  <Skeleton className="w-full h-full" />
+                ) : part.image_url ? (
+                  <img src={part.image_url} alt={part.part_name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Box className="w-6 h-6 text-muted-foreground/30" />
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span>{part.material}</span>
-                <span>{part.manufacturing_method}</span>
-                <span className="text-primary">${part.estimated_cost}</span>
-                <ArrowRight className="w-3 h-3 ml-auto text-primary" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-medium text-sm">{part.part_name}</h3>
+                  <Badge variant="outline" className={statusColors[part.status] || ''}>
+                    {part.status}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span>{part.material}</span>
+                  <span>{part.manufacturing_method}</span>
+                  <span className="text-primary">${part.estimated_cost}</span>
+                  <ArrowRight className="w-3 h-3 ml-auto text-primary" />
+                </div>
               </div>
             </Link>
           ))}
