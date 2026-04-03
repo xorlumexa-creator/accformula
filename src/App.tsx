@@ -61,6 +61,9 @@ const App = () => (
                 <Route path="/project-plan" element={<ProjectPlanPage />} />
                 <Route path="/parts" element={<PartsPage />} />
                 <Route path="/design-guide/:partId" element={<DesignGuidePage />} />
+                <Route path="/code-section" element={<CodeSectionPage />} />
+                <Route path="/ic-wire" element={<ICWirePage />} />
+                <Route path="/pricing" element={<PricingPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

@@ -11,9 +11,11 @@ const navItems = [
   { to: '/import-design', icon: FileInput, label: 'CAD Analysis' },
   { to: '/assembly', icon: Search, label: 'Inspector' },
   { to: '/fea', icon: Microscope, label: 'FEA' },
+  { to: '/code-section', icon: Code2, label: 'Code Section' },
+  { to: '/ic-wire', icon: Cpu, label: 'IC & Wire' },
   { to: '/upload', icon: Upload, label: 'Telemetry' },
   { to: '/chat', icon: MessageSquare, label: 'AI Coach' },
-  { to: '/lap-calculator', icon: Timer, label: 'Lap Calc' },
+  { to: '/pricing', icon: CreditCard, label: 'Pricing' },
 ];
 
 export default function AppLayout() {
