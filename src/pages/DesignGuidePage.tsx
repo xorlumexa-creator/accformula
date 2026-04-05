@@ -90,19 +90,38 @@ export default function DesignGuidePage() {
   const generateDesignGuide = async (partData: any, projData: any, profData: any) => {
     setGenerating(true);
     try {
-      const systemPrompt = `You are Lumexa's engineering guide. Generate a step-by-step baby guide for designing "${partData.part_name}" in ${profData?.cad_software || 'their CAD software'}. 
-User level: ${profData?.experience_level || 'beginner'}
+      const level = profData?.experience_level || 'beginner';
+      const systemPrompt = `You are Lumexa's engineering guide. Generate a step-by-step baby guide for designing "${partData.part_name}" in ${profData?.cad_software || 'their CAD software'}.
+
+User level: ${level}
 Project: ${projData?.project_name} — ${projData?.description}
 Material: ${partData.material}
+Manufacturing: ${partData.manufacturing_method || 'Not specified'}
 
-Format as numbered steps. Each step must have:
-- Action (what to do)
-- Why (brief reason)
-- Expected result
+FORMAT EACH STEP AS:
+**Step [N]: [Title]**
+🎯 Action: [Exact steps — what to click, what to type]
+💡 Why: [Engineering reason this matters]
+✅ Expected Result: [What user should see]
+⚠️ Common Mistake: [What to avoid]
 
-Keep language at ${profData?.experience_level || 'beginner'} level.
-Last step must be: "Export as STL and go to CAD Analysis"
-Never use LaTeX. Use Unicode symbols: σ ε τ Δ π ≈ ² ³ √ × ° μ`;
+RULES:
+- ${level === 'beginner' ? 'Use very simple language. Explain every button click. Assume zero CAD experience.' : level === 'intermediate' ? 'Standard detail. Skip obvious steps.' : 'Advanced detail with engineering rationale.'}
+- Always explain WHY a choice matters (causal reasoning)
+- Never use LaTeX. Use Unicode: σ ε τ Δ π ≈ ² ³ √ × ° μ
+- Last step MUST be: "Export as STL and go to CAD Analysis"
+- End with a Feasibility Scorecard:
+
+📊 FEASIBILITY SCORECARD
+├── Physics:      ✅/⚠️/❌
+├── Materials:    ✅/⚠️/❌
+├── Buildability: ✅/⚠️/❌
+├── Budget:       ✅/⚠️/❌
+└── Safety:       ✅/⚠️/❌
+Confidence: High/Medium/Low
+Difficulty: 1-10
+
+⚠️ AI-assisted analysis only. Not a substitute for certified engineering review.`;
 
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
