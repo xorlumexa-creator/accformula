@@ -4,59 +4,28 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ChevronRight, ChevronLeft, Rocket, Bot, User, Send } from 'lucide-react';
+import { Loader2, Rocket, Bot, User, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
-const categories = [
-  'Drone / UAV', 'Robot / Rover', 'RC Vehicle', 'Wearable Device',
-  'Smart Home Device', 'Musical Instrument', 'Science Instrument', 'Custom Vehicle', 'Other',
-];
-
-const environments = ['Indoor only', 'Outdoor only', 'Both', 'Underwater', 'Aerial', 'Multi-medium'];
-const powerSources = ['Battery (LiPo / Li-Ion)', 'Solar', 'Wired power', 'Multiple sources'];
-const controlMethods = ['Remote controlled', 'Autonomous (AI / programmed)', 'Manual / physical', 'Smartphone app'];
-const microcontrollers = ['Arduino', 'Raspberry Pi', 'ESP32', 'Pixhawk / ArduPilot', 'STM32', 'No preference'];
-
 const GEN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
+const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
-interface GeneratedPart {
-  partName: string;
-  purpose: string;
-  material: string;
-  estimatedCost: number;
-  manufacturingMethod: string;
-  complexity: string;
-}
-
-interface GeneratedElectronic {
-  componentName: string;
-  modelRecommendation: string;
-  whereToBuy: string;
-  price: number;
-  quantity: number;
-  purpose: string;
+interface ChatMsg {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export default function ProjectPlanPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [profile, setProfile] = useState<any>(null);
-
-  const [form, setForm] = useState({
-    project_name: '', description: '', category: '', other_category: '',
-    what_should_it_do: '', environment: '', budget_range: '', budget_currency: 'USD',
-    target_weight: '', target_size: '', power_source: '',
-    control_method: '', microcontroller: '', has_3d_printer: '',
-  });
-
-  const update = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
+  const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -64,56 +33,126 @@ export default function ProjectPlanPage() {
       .then(({ data }) => { if (data) setProfile(data); });
   }, [user]);
 
-  const canNext = () => {
-    if (step === 1) return form.project_name && form.description && form.category;
-    if (step === 2) return form.what_should_it_do && form.environment;
-    if (step === 3) return true;
-    return false;
+  useEffect(() => {
+    chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages]);
+
+  // Auto-start interview on first load
+  useEffect(() => {
+    if (messages.length === 0 && !streaming) {
+      sendMessage('', true);
+    }
+  }, []);
+
+  const sendMessage = async (text: string, isInit = false) => {
+    if (streaming || generating) return;
+    if (!isInit && !text.trim()) return;
+
+    const newMessages: ChatMsg[] = isInit
+      ? []
+      : [...messages, { role: 'user' as const, content: text.trim() }];
+
+    if (!isInit) {
+      setMessages(newMessages);
+      setInput('');
+    }
+
+    setStreaming(true);
+
+    try {
+      const resp = await fetch(GEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          mode: 'interview',
+        }),
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || 'Interview failed');
+      }
+
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let full = '';
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n')) !== -1) {
+          let line = buf.slice(0, idx);
+          buf = buf.slice(idx + 1);
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (!line.startsWith('data: ')) continue;
+          const json = line.slice(6).trim();
+          if (json === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(json);
+            const c = parsed.choices?.[0]?.delta?.content;
+            if (c) {
+              full += c;
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant') {
+                  return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: full } : m);
+                }
+                return [...prev, { role: 'assistant', content: full }];
+              });
+            }
+          } catch {}
+        }
+      }
+
+      // Check if AI wants to generate
+      if (full.includes('GENERATE_BRIEF_NOW')) {
+        const jsonMatch = full.match(/GENERATE_BRIEF_NOW\s*(\{[\s\S]*\})/);
+        if (jsonMatch) {
+          try {
+            const briefData = JSON.parse(jsonMatch[1]);
+            // Remove the GENERATE_BRIEF_NOW from displayed message
+            const cleanMsg = full.replace(/GENERATE_BRIEF_NOW[\s\S]*$/, '').trim();
+            setMessages(prev => {
+              const updated = [...prev];
+              if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                updated[updated.length - 1].content = cleanMsg || "Great! Generating your full engineering package now...";
+              }
+              return updated;
+            });
+            await handleGenerate(briefData, [...newMessages, { role: 'assistant' as const, content: cleanMsg }]);
+          } catch (e) {
+            console.error('Failed to parse brief JSON:', e);
+          }
+        }
+      }
+    } catch (err: any) {
+      toast({ title: err.message || 'Chat failed', variant: 'destructive' });
+    }
+    setStreaming(false);
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (briefData: any, chatHistory: ChatMsg[]) => {
     if (!user || !profile) return;
     setGenerating(true);
 
+    // Show generating message
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: '🚀 **Generating your complete build plan...** This includes parts, electronics, assembly sequence, and testing checklist. Hold tight!'
+    }]);
+
     try {
-      const catValue = form.category === 'Other' ? form.other_category : form.category;
-
-      // Create project in DB
-      const { data: projectData, error: projError } = await supabase.from('projects').insert({
-        user_id: user.id,
-        project_name: form.project_name,
-        description: form.description,
-        category: catValue,
-        purpose: form.what_should_it_do,
-        budget_range: form.budget_range,
-        environment: form.environment,
-        power_source: form.power_source,
-        control_method: form.control_method,
-        microcontroller: form.microcontroller,
-        has_3d_printer: form.has_3d_printer === 'yes',
-        target_weight: form.target_weight,
-        target_size: form.target_size,
-        budget_currency: form.budget_currency || 'USD',
-      }).select('id').single();
-
-      if (projError) throw projError;
-
-      // Call AI to generate parts list
-      const briefData = {
-        projectName: form.project_name,
-        description: form.description,
-        category: catValue,
-        purpose: form.what_should_it_do,
-        environment: form.environment,
-        budget: form.budget_range,
-        targetWeight: form.target_weight,
-        targetSize: form.target_size,
-        powerSource: form.power_source,
-        controlMethod: form.control_method,
-        microcontroller: form.microcontroller,
-        has3dPrinter: form.has_3d_printer,
+      const enrichedBrief = {
+        ...briefData,
         cadSoftware: profile.cad_software,
-        experienceLevel: profile.experience_level,
+        experienceLevel: profile.experience_level || briefData.userLevel,
         country: profile.country,
       };
 
@@ -123,21 +162,42 @@ export default function ProjectPlanPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: [], mode: 'generate_parts', briefData }),
+        body: JSON.stringify({ messages: [], mode: 'generate_parts', briefData: enrichedBrief }),
       });
 
       if (!resp.ok) throw new Error('Failed to generate parts list');
       const result = await resp.json();
+      if (result.error) throw new Error(result.error);
 
-      // Save body parts
-      if (result.parts && Array.isArray(result.parts)) {
+      // Create project
+      const { data: projectData, error: projError } = await supabase.from('projects').insert({
+        user_id: user.id,
+        project_name: briefData.projectName || 'My Project',
+        description: briefData.description || briefData.purpose || '',
+        category: briefData.category || '',
+        purpose: briefData.purpose || '',
+        budget_range: briefData.budget || '',
+        environment: briefData.environment || '',
+        power_source: briefData.powerSource || '',
+        control_method: briefData.controlMethod || '',
+        microcontroller: briefData.microcontroller || '',
+        has_3d_printer: briefData.has3dPrinter || false,
+        target_weight: briefData.targetWeight || '',
+        target_size: briefData.targetSize || '',
+        budget_currency: briefData.budgetCurrency || 'USD',
+      }).select('id').single();
+
+      if (projError) throw projError;
+
+      // Save parts
+      if (result.parts?.length) {
         const partsToInsert = result.parts.map((p: any, i: number) => ({
           project_id: projectData.id,
           user_id: user.id,
           part_name: p.partName || p.part_name || `Part ${i + 1}`,
           material: p.material || '',
-          manufacturing_method: p.fabricateOrBuy === 'fabricate' ? '3D Print / Custom' : 'Purchase',
-          estimated_cost: p.estimatedCostUSD || 0,
+          manufacturing_method: p.manufacturingMethod || '',
+          estimated_cost: p.estimatedCostUSD || p.estimatedCost || 0,
           complexity: p.complexity || 'Beginner',
           sort_order: i,
         }));
@@ -145,213 +205,137 @@ export default function ProjectPlanPage() {
       }
 
       // Save electronics
-      if (result.electronics && Array.isArray(result.electronics)) {
-        const electronicsToInsert = result.electronics.map((e: any, i: number) => ({
+      if (result.electronics?.length) {
+        const elecToInsert = result.electronics.map((e: any, i: number) => ({
           project_id: projectData.id,
           user_id: user.id,
-          component_name: e.componentName || e.component_name || `Component ${i + 1}`,
-          model_recommendation: e.modelRecommendation || e.model || '',
-          where_to_buy: e.whereToBuy || e.where_to_buy || '',
+          component_name: e.componentName || `Component ${i + 1}`,
+          model_recommendation: e.modelRecommendation || '',
+          where_to_buy: e.whereToBuy || '',
           price: e.price || 0,
           quantity: e.quantity || 1,
           purpose: e.purpose || '',
           sort_order: i,
         }));
-        await supabase.from('project_electronics').insert(electronicsToInsert);
+        await supabase.from('project_electronics').insert(elecToInsert);
       }
 
-      // Generate tasks from parts
+      // Generate tasks
       const allParts = result.parts || [];
-      const taskInserts = [];
+      const taskInserts: any[] = [];
       let taskNum = 1;
       for (const part of allParts) {
         const name = part.partName || part.part_name || 'Part';
-        taskInserts.push({
-          project_id: projectData.id, user_id: user.id,
-          task_number: taskNum++, title: `Design ${name}`, estimated_hours: 2, phase: 2, sort_order: taskNum,
-        });
-        taskInserts.push({
-          project_id: projectData.id, user_id: user.id,
-          task_number: taskNum++, title: `Analyse ${name}`, estimated_hours: 1, phase: 3, sort_order: taskNum,
-        });
+        taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: `Design ${name}`, estimated_hours: 2, phase: 2, sort_order: taskNum });
+        taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: `Analyse ${name}`, estimated_hours: 1, phase: 3, sort_order: taskNum });
       }
-      taskInserts.push({
-        project_id: projectData.id, user_id: user.id,
-        task_number: taskNum++, title: 'Write Control Code', estimated_hours: 4, phase: 4, sort_order: taskNum,
-      });
-      taskInserts.push({
-        project_id: projectData.id, user_id: user.id,
-        task_number: taskNum++, title: 'Complete Assembly', estimated_hours: 3, phase: 5, sort_order: taskNum,
-      });
-      taskInserts.push({
-        project_id: projectData.id, user_id: user.id,
-        task_number: taskNum++, title: 'Test & Calibrate', estimated_hours: 2, phase: 6, sort_order: taskNum,
-      });
-
+      taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: 'Write Control Code', estimated_hours: 4, phase: 4, sort_order: taskNum });
+      taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: 'Complete Assembly', estimated_hours: 3, phase: 5, sort_order: taskNum });
+      taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: 'Test & Calibrate', estimated_hours: 2, phase: 6, sort_order: taskNum });
       await supabase.from('project_tasks').insert(taskInserts);
 
-      toast({ title: 'Project created! Your build plan is ready.' });
-      navigate('/parts');
+      // Generate hero image in background
+      if (result.hero_image_prompt) {
+        fetch(IMAGE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+          body: JSON.stringify({ prompt: result.hero_image_prompt }),
+        }).then(r => r.json()).then(data => {
+          if (data.imageUrl) {
+            supabase.from('projects').update({ hero_image_url: data.imageUrl } as any).eq('id', projectData.id);
+          }
+        }).catch(() => {});
+      }
+
+      // Show feasibility summary
+      if (result.feasibility) {
+        const f = result.feasibility;
+        const icon = (v: string) => v === 'pass' ? '✅' : v === 'warning' ? '⚠️' : '❌';
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `## 📊 Feasibility Scorecard\n\n| Check | Status |\n|---|---|\n| Physics | ${icon(f.physics)} |\n| Materials | ${icon(f.materials)} |\n| Buildability | ${icon(f.buildability)} |\n| Budget | ${icon(f.budget)} |\n| Safety | ${icon(f.safety)} |\n\n**Confidence:** ${f.confidence || 'Medium'}\n\n${f.issues?.length ? '**Issues:** ' + f.issues.join(', ') : ''}\n\n✅ **Your project "${briefData.projectName}" has been created!** Redirecting to your parts list...`
+        }]);
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `✅ **Your project "${briefData.projectName}" has been created!** Redirecting to your parts list...`
+        }]);
+      }
+
+      setTimeout(() => navigate('/parts'), 2500);
     } catch (err: any) {
       toast({ title: err.message || 'Generation failed', variant: 'destructive' });
-    } finally {
-      setGenerating(false);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '❌ Something went wrong during generation. Please try again.'
+      }]);
     }
+    setGenerating(false);
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-slide-up">
-      <div className="flex items-center gap-3">
+    <div className="max-w-2xl mx-auto space-y-4 animate-slide-up flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
+      {/* Header */}
+      <div className="flex items-center gap-3 shrink-0">
         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
           <Rocket className="w-5 h-5 text-primary" />
         </div>
         <div>
           <h1 className="text-2xl font-bold">Project Plan</h1>
-          <p className="text-sm text-muted-foreground">Tell us about your project and we'll generate your build plan</p>
+          <p className="text-sm text-muted-foreground">Chat with Lumexa to design your project</p>
         </div>
       </div>
 
-      {/* Progress */}
-      <div className="flex gap-2">
-        {[1, 2, 3].map(s => (
-          <div key={s} className={`flex-1 h-1 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-border/30'}`} />
-        ))}
-      </div>
-
-      <Card className="border-border/30" style={{ background: '#111111' }}>
-        <CardHeader>
-          <CardTitle className="text-lg">
-            {step === 1 && 'Project Identity'}
-            {step === 2 && 'Requirements'}
-            {step === 3 && 'Technical Preferences'}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {step === 1 && (
-            <>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Project Name *</label>
-                <Input value={form.project_name} onChange={e => update('project_name', e.target.value)} placeholder="e.g. Racing Drone v1" />
+      {/* Chat Area */}
+      <div ref={chatRef} className="flex-1 overflow-y-auto space-y-3 rounded-xl border border-border/30 p-4" style={{ background: '#111111' }}>
+        {messages.length === 0 && !streaming && (
+          <div className="flex items-center justify-center h-full text-muted-foreground/50">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            Starting interview...
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {msg.role === 'assistant' && (
+              <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1">
+                <Bot className="w-4 h-4 text-primary" />
               </div>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">What are you building? *</label>
-                <Textarea value={form.description} onChange={e => update('description', e.target.value)} placeholder="One-line description of your project" rows={2} />
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Category *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {categories.map(c => (
-                    <button key={c} type="button" onClick={() => update('category', c)}
-                      className={`text-left text-sm px-3 py-2.5 rounded-lg border transition-all ${form.category === c ? 'border-primary bg-primary/10 text-primary' : 'border-border/30 text-muted-foreground hover:border-primary/30'}`}>
-                      {c}
-                    </button>
-                  ))}
-                </div>
-                {form.category === 'Other' && (
-                  <Input className="mt-2" value={form.other_category} onChange={e => update('other_category', e.target.value)} placeholder="Describe your project category" />
-                )}
-              </div>
-            </>
-          )}
-
-          {step === 2 && (
-            <>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">What should it do? *</label>
-                <Textarea value={form.what_should_it_do} onChange={e => update('what_should_it_do', e.target.value)} placeholder="Describe the functionality in detail" rows={3} />
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Operating Environment *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {environments.map(e => (
-                    <button key={e} type="button" onClick={() => update('environment', e)}
-                      className={`text-left text-sm px-3 py-2.5 rounded-lg border transition-all ${form.environment === e ? 'border-primary bg-primary/10 text-primary' : 'border-border/30 text-muted-foreground hover:border-primary/30'}`}>
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">Budget</label>
-                  <Input value={form.budget_range} onChange={e => update('budget_range', e.target.value)} placeholder="e.g. $200" />
-                </div>
-                <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">Target Weight</label>
-                  <Input value={form.target_weight} onChange={e => update('target_weight', e.target.value)} placeholder="e.g. 500g" />
-                </div>
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Power Source</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {powerSources.map(p => (
-                    <button key={p} type="button" onClick={() => update('power_source', p)}
-                      className={`text-left text-sm px-3 py-2.5 rounded-lg border transition-all ${form.power_source === p ? 'border-primary bg-primary/10 text-primary' : 'border-border/30 text-muted-foreground hover:border-primary/30'}`}>
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {step === 3 && (
-            <>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Control Method</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {controlMethods.map(c => (
-                    <button key={c} type="button" onClick={() => update('control_method', c)}
-                      className={`text-left text-sm px-3 py-2.5 rounded-lg border transition-all ${form.control_method === c ? 'border-primary bg-primary/10 text-primary' : 'border-border/30 text-muted-foreground hover:border-primary/30'}`}>
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Microcontroller</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {microcontrollers.map(m => (
-                    <button key={m} type="button" onClick={() => update('microcontroller', m)}
-                      className={`text-left text-sm px-3 py-2.5 rounded-lg border transition-all ${form.microcontroller === m ? 'border-primary bg-primary/10 text-primary' : 'border-border/30 text-muted-foreground hover:border-primary/30'}`}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground mb-1 block">Do you have a 3D printer?</label>
-                <div className="flex gap-2">
-                  {['Yes, I have a printer', 'Yes, using a service', 'No'].map(o => (
-                    <button key={o} type="button" onClick={() => update('has_3d_printer', o === 'No' ? 'no' : 'yes')}
-                      className={`flex-1 text-sm px-3 py-2.5 rounded-lg border transition-all ${(form.has_3d_printer === 'yes' && o !== 'No') || (form.has_3d_printer === 'no' && o === 'No') ? 'border-primary bg-primary/10 text-primary' : 'border-border/30 text-muted-foreground hover:border-primary/30'}`}>
-                      {o}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          <div className="flex gap-3 pt-2">
-            {step > 1 && (
-              <Button variant="outline" onClick={() => setStep(s => s - 1)} className="flex-1">
-                <ChevronLeft className="w-4 h-4 mr-1" /> Back
-              </Button>
             )}
-            {step < 3 ? (
-              <Button onClick={() => setStep(s => s + 1)} disabled={!canNext()} className="flex-1">
-                Next <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            ) : (
-              <Button onClick={handleGenerate} disabled={generating} className="flex-1">
-                {generating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Rocket className="w-4 h-4 mr-2" />}
-                {generating ? 'Generating Build Plan...' : 'Generate Build Plan'}
-              </Button>
+            <div className={`max-w-[85%] rounded-xl px-4 py-3 text-sm ${
+              msg.role === 'user'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary/30 prose prose-sm prose-invert max-w-none'
+            }`}>
+              {msg.role === 'assistant' ? <ReactMarkdown>{msg.content}</ReactMarkdown> : msg.content}
+            </div>
+            {msg.role === 'user' && (
+              <div className="w-7 h-7 rounded-full bg-secondary/50 flex items-center justify-center shrink-0 mt-1">
+                <User className="w-4 h-4" />
+              </div>
             )}
           </div>
-        </CardContent>
-      </Card>
+        ))}
+        {streaming && (
+          <div className="flex gap-2 items-center text-muted-foreground/50 text-xs pl-9">
+            <Loader2 className="w-3 h-3 animate-spin" /> Thinking...
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div className="flex gap-2 shrink-0">
+        <Input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
+          placeholder={generating ? "Generating your build plan..." : "Describe your project..."}
+          disabled={streaming || generating}
+          className="flex-1"
+        />
+        <Button size="icon" onClick={() => sendMessage(input)} disabled={streaming || generating || !input.trim()}>
+          {streaming || generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+        </Button>
+      </div>
     </div>
   );
 }
