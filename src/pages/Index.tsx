@@ -9,10 +9,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
 
 const phases = ['Planning', 'Design', 'Analysis', 'Code', 'Assembly', 'Testing'];
-const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
 interface Project {
   id: string;
@@ -21,7 +19,6 @@ interface Project {
   category: string;
   current_phase: number;
   progress_percent: number;
-  hero_image_url?: string;
 }
 
 interface Task {
@@ -48,7 +45,6 @@ export default function DashboardPage() {
   const [streak, setStreak] = useState<Streak>({ current_streak: 0, longest_streak: 0, last_active_date: null });
   const [loading, setLoading] = useState(true);
   const [hasOnboarded, setHasOnboarded] = useState<boolean | null>(null);
-  const [heroLoading, setHeroLoading] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -73,16 +69,10 @@ export default function DashboardPage() {
 
     if (projects?.[0]) {
       setProject(projects[0] as Project);
-
       const { data: taskData } = await supabase.from('project_tasks')
         .select('*').eq('project_id', projects[0].id)
         .order('sort_order', { ascending: true });
       if (taskData) setTasks(taskData as Task[]);
-
-      // Generate hero image if missing
-      if (!projects[0].hero_image_url) {
-        generateHeroImage(projects[0]);
-      }
     }
 
     const { data: streakData } = await supabase.from('user_streaks')
@@ -91,28 +81,6 @@ export default function DashboardPage() {
 
     await updateStreak();
     setLoading(false);
-  };
-
-  const generateHeroImage = async (proj: any) => {
-    setHeroLoading(true);
-    try {
-      const prompt = `Photorealistic engineering render of ${proj.project_name}: ${proj.description}. Professional product photography, dark background, all components assembled, technical illustration style, high detail, studio lighting.`;
-      const resp = await fetch(IMAGE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
-        body: JSON.stringify({ prompt }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.imageUrl) {
-          await supabase.from('projects').update({ hero_image_url: data.imageUrl } as any).eq('id', proj.id);
-          setProject(p => p ? { ...p, hero_image_url: data.imageUrl } : null);
-        }
-      }
-    } catch (e) {
-      console.error('Hero image generation failed:', e);
-    }
-    setHeroLoading(false);
   };
 
   const updateStreak = async () => {
@@ -159,7 +127,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-slide-up">
-      {/* Welcome Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">
@@ -174,7 +141,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* No Project State */}
       {!project && (
         <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-6">
           <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center">
@@ -183,7 +149,7 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-2xl font-bold mb-2">Welcome to Lumexa!</h2>
             <p className="text-muted-foreground max-w-md">
-              Start by creating your first project. Lumexa will generate a personalized build plan with parts, guides, and step-by-step instructions.
+              Start by creating your first project. Lumexa will generate a personalized build plan.
             </p>
           </div>
           <Button size="lg" onClick={() => navigate('/project-plan')} className="gap-2">
@@ -192,17 +158,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Hero Image + Active Project Card */}
       {project && (
         <div className="rounded-xl border border-border/30 overflow-hidden" style={{ background: '#111111' }}>
-          {/* Hero Image */}
-          {heroLoading ? (
-            <Skeleton className="w-full h-48 rounded-none" />
-          ) : project.hero_image_url ? (
-            <img src={project.hero_image_url} alt={project.project_name}
-              className="w-full h-48 object-cover" />
-          ) : null}
-
           <div className="p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -224,7 +181,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Task Schedule */}
       {project && tasks.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-lg font-bold flex items-center gap-2">
@@ -254,7 +210,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Quick Nav */}
       {project && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
