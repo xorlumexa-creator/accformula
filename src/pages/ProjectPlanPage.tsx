@@ -9,7 +9,7 @@ import { Loader2, Rocket, Bot, User, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 const GEN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
-const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
+
 
 interface ChatMsg {
   role: 'user' | 'assistant';
@@ -234,18 +234,7 @@ export default function ProjectPlanPage() {
       taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: 'Test & Calibrate', estimated_hours: 2, phase: 6, sort_order: taskNum });
       await supabase.from('project_tasks').insert(taskInserts);
 
-      // Generate hero image in background
-      if (result.hero_image_prompt) {
-        fetch(IMAGE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
-          body: JSON.stringify({ prompt: result.hero_image_prompt }),
-        }).then(r => r.json()).then(data => {
-          if (data.imageUrl) {
-            supabase.from('projects').update({ hero_image_url: data.imageUrl } as any).eq('id', projectData.id);
-          }
-        }).catch(() => {});
-      }
+      // Hero image generation removed — no image generation in v7
 
       // Show feasibility summary
       if (result.feasibility) {
