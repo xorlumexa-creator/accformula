@@ -2,13 +2,11 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, Upload, Cpu, Download, Image as ImageIcon } from 'lucide-react';
+import { Loader2, Upload, Cpu } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
 const views = ['Top View', 'Bottom View', 'Front View', 'Back View', 'Left View', 'Right View'];
 
@@ -17,8 +15,6 @@ export default function ICWirePage() {
   const [images, setImages] = useState<(string | null)[]>(Array(6).fill(null));
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState('');
-  const [generatedDiagrams, setGeneratedDiagrams] = useState<string[]>([]);
-  const [diagramLoading, setDiagramLoading] = useState(false);
   const [project, setProject] = useState<any>(null);
   const [electronics, setElectronics] = useState<any[]>([]);
 
@@ -53,7 +49,6 @@ export default function ICWirePage() {
     if (uploadedCount < 2) { toast.error('Upload at least 2 views'); return; }
     setAnalyzing(true);
     setResult('');
-    setGeneratedDiagrams([]);
 
     try {
       const electronicsContext = electronics.map(e =>
@@ -75,8 +70,8 @@ ${viewDescriptions}
 
 Based on the uploaded views and electronics list, generate a comprehensive wiring and IC placement guide:
 
-1. **Component Placement Map** — Exact location of each electronic component inside the assembly, referencing which view shows it best
-2. **Wire Routing Paths** — Optimal paths for wires between components with specific routing through the assembly
+1. **Component Placement Map** — Exact location of each electronic component inside the assembly
+2. **Wire Routing Paths** — Optimal paths for wires between components
 3. **Connection Diagram** — Which pins connect to which (text-based pinout schematic)
 4. **Clearance Warnings** — Any potential issues with component placement or wire routing
 5. **Assembly Sequence** — Numbered order to install each electronic component
@@ -119,71 +114,19 @@ Format with markdown headers and bullet points.`;
           } catch {}
         }
       }
-
-      // After text analysis, generate annotated wiring diagrams from uploaded images
-      await generateWiringDiagrams(full);
     } catch {
       toast.error('Analysis failed. Please try again.');
     }
     setAnalyzing(false);
   };
 
-  const generateWiringDiagrams = async (analysisText: string) => {
-    setDiagramLoading(true);
-    const diagrams: string[] = [];
-
-    // Generate annotated diagrams for each uploaded view
-    const uploadedImages = images.map((img, i) => img ? { img, view: views[i] } : null).filter(Boolean) as { img: string; view: string }[];
-
-    const componentsText = electronics.map(e => e.component_name).join(', ');
-
-    for (const { img, view } of uploadedImages.slice(0, 4)) {
-      try {
-        const editPrompt = `Take this exact ${view} of the engineering assembly and overlay a professional wiring/IC placement diagram on top of it. Keep the original image 100% intact and identical. Add these overlays:
-- Draw colored component placement boxes with labels for: ${componentsText}
-- Draw wire routing lines between components in different colors (red for power, blue for signal, green for ground)
-- Add pin labels at connection points
-- Add small arrows showing wire direction
-- Use a semi-transparent overlay so the original CAD image remains fully visible
-- Make labels clean and readable with dark backgrounds behind white text
-Style: Professional engineering diagram overlay, clean lines, high contrast labels`;
-
-        const resp = await fetch(IMAGE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
-          body: JSON.stringify({
-            prompt: editPrompt,
-            editImage: img,
-            model: 'google/gemini-3-pro-image-preview',
-          }),
-        });
-
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.imageUrl) {
-            diagrams.push(data.imageUrl);
-            setGeneratedDiagrams([...diagrams]);
-          }
-        }
-      } catch (e) {
-        console.error(`Diagram generation failed for ${view}:`, e);
-      }
-    }
-
-    if (diagrams.length === 0) {
-      toast('Text analysis complete. Image overlay generation was skipped.', { description: 'You can still use the text guide below.' });
-    }
-    setDiagramLoading(false);
-  };
-
   return (
     <div className="space-y-6 animate-slide-up max-w-3xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2"><Cpu className="w-6 h-6 text-primary" /> IC & Wire Integration</h1>
-        <p className="text-sm text-muted-foreground mt-1">Upload assembly views for AI-generated wiring diagram</p>
+        <p className="text-sm text-muted-foreground mt-1">Upload assembly views for AI-generated wiring guide</p>
       </div>
 
-      {/* Upload Grid */}
       <div className="rounded-xl border border-border/30 p-5" style={{ background: '#111111' }}>
         <h2 className="text-lg font-bold mb-4">Upload 6 Views of Your Assembly</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -209,37 +152,9 @@ Style: Professional engineering diagram overlay, clean lines, high contrast labe
       </div>
 
       <Button onClick={analyze} disabled={uploadedCount < 2 || analyzing} className="w-full gap-2">
-        {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing & Generating Diagrams...</> : <><Cpu className="w-4 h-4" /> Generate Wiring Diagram</>}
+        {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing...</> : <><Cpu className="w-4 h-4" /> Generate Wiring Guide</>}
       </Button>
 
-      {/* Generated Wiring Diagrams */}
-      {(generatedDiagrams.length > 0 || diagramLoading) && (
-        <div className="rounded-xl border border-primary/30 p-5" style={{ background: '#111111' }}>
-          <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
-            <ImageIcon className="w-5 h-5 text-primary" /> Annotated Wiring Diagrams
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {generatedDiagrams.map((diagram, i) => (
-              <div key={i} className="rounded-lg overflow-hidden border border-border/20">
-                <img src={diagram} alt={`Wiring diagram ${i + 1}`} className="w-full h-auto" />
-                <div className="p-2 text-xs text-muted-foreground text-center" style={{ background: '#0a0a0a' }}>
-                  {uploadedViews[i] || `Diagram ${i + 1}`} — IC Overlay
-                </div>
-              </div>
-            ))}
-            {diagramLoading && (
-              <div className="rounded-lg border border-border/20 overflow-hidden">
-                <Skeleton className="w-full aspect-square" />
-                <div className="p-2 text-xs text-muted-foreground text-center" style={{ background: '#0a0a0a' }}>
-                  Generating overlay...
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Text Analysis */}
       {result && (
         <div className="rounded-xl border border-border/30 p-5" style={{ background: '#111111' }}>
           <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
@@ -252,7 +167,7 @@ Style: Professional engineering diagram overlay, clean lines, high contrast labe
       )}
 
       <p className="text-xs text-muted-foreground text-center">
-        Wiring diagrams are AI-generated guidance. Always verify connections before powering on.
+        Wiring guides are AI-generated guidance. Always verify connections before powering on.
       </p>
     </div>
   );
