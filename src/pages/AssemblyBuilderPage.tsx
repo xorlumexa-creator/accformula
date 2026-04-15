@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const PYTHON_API = 'https://python-1--epicure742.replit.app/analyze-part';
+const PYTHON_API = 'https://salman894552-axul.hf.space/analyze-part';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 interface PartGeometry {
