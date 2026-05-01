@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import AdSenseBanner from '@/components/AdSenseBanner';
 import { useTelemetry } from '@/context/TelemetryContext';
 import { Link } from 'react-router-dom';
 import { BarChart3, Upload } from 'lucide-react';
@@ -130,6 +131,7 @@ export default function AnalysisPage() {
           </ResponsiveContainer>
         </div>
       </div>
+      <AdSenseBanner />
     </div>
   );
 }

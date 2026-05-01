@@ -9,6 +9,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import AdSenseBanner from '@/components/AdSenseBanner';
 
 const phases = ['Planning', 'Design', 'Analysis', 'Code', 'Assembly', 'Testing'];
 
@@ -227,6 +228,8 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+
+      <AdSenseBanner />
     </div>
   );
 }

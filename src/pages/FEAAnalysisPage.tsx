@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import AdSenseBanner from '@/components/AdSenseBanner';
 import { useNavigate } from 'react-router-dom';
 import { Microscope, Upload, FileText, AlertTriangle, Shield, Activity, MapPin, Percent, Clock, ChevronRight, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -290,6 +291,7 @@ export default function FEAAnalysisPage() {
       <p className="text-[11px] text-muted-foreground/60 text-center pt-4">
         Lumexa FEA Interpretation is AI-powered analysis of your existing FEA results. It does not replace certified FEA simulation software.
       </p>
+      <AdSenseBanner />
     </div>
   );
 }
