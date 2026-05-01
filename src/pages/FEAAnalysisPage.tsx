@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import AdSenseBanner from '@/components/AdSenseBanner';
 import { useNavigate } from 'react-router-dom';
 import { Microscope, Upload, FileText, AlertTriangle, Shield, Activity, MapPin, Percent, Clock, ChevronRight, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import AdSenseBanner from '@/components/AdSenseBanner';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Link, useNavigate } from 'react-router-dom';
