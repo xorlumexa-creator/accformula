@@ -291,6 +291,7 @@ export default function FEAAnalysisPage() {
       <p className="text-[11px] text-muted-foreground/60 text-center pt-4">
         Lumexa FEA Interpretation is AI-powered analysis of your existing FEA results. It does not replace certified FEA simulation software.
       </p>
+      <AdSenseBanner />
     </div>
   );
 }

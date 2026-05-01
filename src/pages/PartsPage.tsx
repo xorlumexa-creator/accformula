@@ -178,6 +178,7 @@ export default function PartsPage() {
           <Progress value={Math.min((grandTotal / budgetNum) * 100, 100)} className="h-1.5 mt-3" />
         )}
       </div>
+      <AdSenseBanner />
     </div>
   );
 }

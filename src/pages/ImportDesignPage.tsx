@@ -793,6 +793,7 @@ export default function ImportDesignPage() {
           )}
         </div>
       </div>
+      <AdSenseBanner />
     </div>
   );
 }

@@ -131,6 +131,7 @@ export default function AnalysisPage() {
           </ResponsiveContainer>
         </div>
       </div>
+      <AdSenseBanner />
     </div>
   );
 }
