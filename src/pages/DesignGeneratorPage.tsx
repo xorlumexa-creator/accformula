@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { useNavigate } from 'react-router-dom';
-import { Send, Bot, User, Sparkles, Loader2, Clipboard, FileInput, Package, AlertTriangle, CheckCircle, Wrench, ShoppingCart } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Loader2, Clipboard, FileInput, Package, AlertTriangle, CheckCircle, Wrench, ShoppingCart, Box, X, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
+import CADViewer from '@/components/CADViewer';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -40,6 +41,7 @@ interface Brief {
 }
 
 const GEN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
+const STL_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-part-stl`;
 const OPENING_MSG = "Hello! I'm your Lumexa Design Engineer. I'll help you plan your build from scratch by asking the right engineering questions.\n\nLet's start simple — **what do you want to build?** Describe it in your own words, no technical knowledge needed.";
 
 export default function DesignGeneratorPage() {
@@ -52,7 +54,47 @@ export default function DesignGeneratorPage() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [generatingBrief, setGeneratingBrief] = useState(false);
   const [checkedParts, setCheckedParts] = useState<Set<number>>(new Set());
+  const [generatingPart, setGeneratingPart] = useState<number | null>(null);
+  const [partStls, setPartStls] = useState<Record<number, { url: string; source: string }>>({});
+  const [viewerPart, setViewerPart] = useState<Part | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const generatePartSTL = async (part: Part) => {
+    setGeneratingPart(part.partNumber);
+    try {
+      const prompt = `${part.partName}: ${part.function}. Material: ${part.material}. Dimensions: ${part.dimensions?.x}x${part.dimensions?.y}x${part.dimensions?.z}mm.`;
+      const r = await fetch(STL_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ prompt, material: part.material }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: 'Failed' }));
+        throw new Error(err.detail || err.error || 'Generation failed');
+      }
+      const source = r.headers.get('x-source') || 'template';
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      setPartStls(prev => ({ ...prev, [part.partNumber]: { url, source } }));
+      setViewerPart(part);
+      toast.success(`Generated ${part.partName} (${source})`);
+    } catch (e: any) {
+      toast.error(e.message || 'Generation failed');
+    }
+    setGeneratingPart(null);
+  };
+
+  const generateAllParts = async () => {
+    if (!brief) return;
+    for (const p of brief.parts) {
+      if (!partStls[p.partNumber]) {
+        await generatePartSTL(p);
+      }
+    }
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
