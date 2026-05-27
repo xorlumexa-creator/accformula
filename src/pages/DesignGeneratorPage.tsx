@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { useNavigate } from 'react-router-dom';
-import { Send, Bot, User, Sparkles, Loader2, Clipboard, FileInput, Package, AlertTriangle, CheckCircle, Wrench, ShoppingCart } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Loader2, Clipboard, FileInput, Package, AlertTriangle, CheckCircle, Wrench, ShoppingCart, Box, X, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
+import CADViewer from '@/components/CADViewer';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -40,6 +41,7 @@ interface Brief {
 }
 
 const GEN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
+const STL_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-part-stl`;
 const OPENING_MSG = "Hello! I'm your Lumexa Design Engineer. I'll help you plan your build from scratch by asking the right engineering questions.\n\nLet's start simple — **what do you want to build?** Describe it in your own words, no technical knowledge needed.";
 
 export default function DesignGeneratorPage() {
@@ -52,7 +54,47 @@ export default function DesignGeneratorPage() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [generatingBrief, setGeneratingBrief] = useState(false);
   const [checkedParts, setCheckedParts] = useState<Set<number>>(new Set());
+  const [generatingPart, setGeneratingPart] = useState<number | null>(null);
+  const [partStls, setPartStls] = useState<Record<number, { url: string; source: string }>>({});
+  const [viewerPart, setViewerPart] = useState<Part | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const generatePartSTL = async (part: Part) => {
+    setGeneratingPart(part.partNumber);
+    try {
+      const prompt = `${part.partName}: ${part.function}. Material: ${part.material}. Dimensions: ${part.dimensions?.x}x${part.dimensions?.y}x${part.dimensions?.z}mm.`;
+      const r = await fetch(STL_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ prompt, material: part.material }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: 'Failed' }));
+        throw new Error(err.detail || err.error || 'Generation failed');
+      }
+      const source = r.headers.get('x-source') || 'template';
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      setPartStls(prev => ({ ...prev, [part.partNumber]: { url, source } }));
+      setViewerPart(part);
+      toast.success(`Generated ${part.partName} (${source})`);
+    } catch (e: any) {
+      toast.error(e.message || 'Generation failed');
+    }
+    setGeneratingPart(null);
+  };
+
+  const generateAllParts = async () => {
+    if (!brief) return;
+    for (const p of brief.parts) {
+      if (!partStls[p.partNumber]) {
+        await generatePartSTL(p);
+      }
+    }
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -281,14 +323,23 @@ export default function DesignGeneratorPage() {
 
               {/* Parts List */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="text-sm font-bold text-primary font-display uppercase tracking-wider">
                     Required Parts & Components
                   </h3>
-                  <span className="text-xs text-muted-foreground">Est. Total: ${totalCost.toFixed(0)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Est. Total: ${totalCost.toFixed(0)}</span>
+                    <button onClick={generateAllParts} disabled={generatingPart !== null}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50">
+                      {generatingPart !== null ? <Loader2 className="w-3 h-3 animate-spin" /> : <Box className="w-3 h-3" />}
+                      Generate All 3D
+                    </button>
+                  </div>
                 </div>
                 {brief.parts.map(p => {
                   const analysed = isPartAnalysed(p.partName);
+                  const stl = partStls[p.partNumber];
+                  const isGen = generatingPart === p.partNumber;
                   return (
                     <div key={p.partNumber} className="rounded-lg border border-border/30 p-3 flex items-start gap-3" style={{ background: '#111111' }}>
                       <input type="checkbox"
@@ -309,6 +360,7 @@ export default function DesignGeneratorPage() {
                             {p.fabricateOrBuy === 'buy' ? <><ShoppingCart className="w-3 h-3 mr-1" />Buy</> : <><Wrench className="w-3 h-3 mr-1" />Fabricate</>}
                           </Badge>
                           {analysed && <Badge className="bg-green-600/20 text-green-400 text-[10px]"><CheckCircle className="w-3 h-3 mr-1" />Analysed</Badge>}
+                          {stl && <Badge className="bg-primary/20 text-primary text-[10px]"><Box className="w-3 h-3 mr-1" />3D Ready</Badge>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{p.function}</p>
                         <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
@@ -317,6 +369,20 @@ export default function DesignGeneratorPage() {
                           <span>Qty: {p.quantity}</span>
                           <span>${p.estimatedCostUSD}</span>
                         </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {stl ? (
+                          <button onClick={() => setViewerPart(p)}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-primary/20 text-primary text-[10px] font-medium hover:bg-primary/30">
+                            <Box className="w-3 h-3" /> View 3D
+                          </button>
+                        ) : (
+                          <button onClick={() => generatePartSTL(p)} disabled={isGen || generatingPart !== null}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-secondary text-foreground text-[10px] font-medium hover:bg-secondary/80 disabled:opacity-50">
+                            {isGen ? <Loader2 className="w-3 h-3 animate-spin" /> : <Box className="w-3 h-3" />}
+                            Generate 3D
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -365,6 +431,34 @@ export default function DesignGeneratorPage() {
           )}
         </div>
       </div>
+
+      {/* 3D Viewer Modal */}
+      {viewerPart && partStls[viewerPart.partNumber] && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setViewerPart(null)}>
+          <div className="w-full max-w-5xl h-[80vh] rounded-xl border border-primary/30 flex flex-col overflow-hidden" style={{ background: '#0a0a0a' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-border/30">
+              <div>
+                <h3 className="text-base font-bold text-primary font-display">{viewerPart.partName}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {viewerPart.material} · {viewerPart.dimensions?.x}×{viewerPart.dimensions?.y}×{viewerPart.dimensions?.z}mm · Source: {partStls[viewerPart.partNumber].source}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a href={partStls[viewerPart.partNumber].url} download={`${viewerPart.partName.replace(/\s+/g, '_')}.stl`}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90">
+                  <Download className="w-3 h-3" /> STL
+                </a>
+                <button onClick={() => setViewerPart(null)} className="p-1.5 rounded hover:bg-secondary">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 relative">
+              <CADViewer fileUrl={partStls[viewerPart.partNumber].url} fileType="stl" className="h-full" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
