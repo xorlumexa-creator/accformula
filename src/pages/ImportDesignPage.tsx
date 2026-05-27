@@ -19,7 +19,7 @@ import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 
-const BACKEND_URL = 'https://salman894552-axul.hf.space';
+const BACKEND_URL = 'https://salman894552-lumexav8.hf.space';
 const INTERPRET_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gemini-interpret`;
 
 const ACCURACY_LEVELS = [
