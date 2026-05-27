@@ -323,14 +323,23 @@ export default function DesignGeneratorPage() {
 
               {/* Parts List */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="text-sm font-bold text-primary font-display uppercase tracking-wider">
                     Required Parts & Components
                   </h3>
-                  <span className="text-xs text-muted-foreground">Est. Total: ${totalCost.toFixed(0)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Est. Total: ${totalCost.toFixed(0)}</span>
+                    <button onClick={generateAllParts} disabled={generatingPart !== null}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50">
+                      {generatingPart !== null ? <Loader2 className="w-3 h-3 animate-spin" /> : <Box className="w-3 h-3" />}
+                      Generate All 3D
+                    </button>
+                  </div>
                 </div>
                 {brief.parts.map(p => {
                   const analysed = isPartAnalysed(p.partName);
+                  const stl = partStls[p.partNumber];
+                  const isGen = generatingPart === p.partNumber;
                   return (
                     <div key={p.partNumber} className="rounded-lg border border-border/30 p-3 flex items-start gap-3" style={{ background: '#111111' }}>
                       <input type="checkbox"
@@ -351,6 +360,7 @@ export default function DesignGeneratorPage() {
                             {p.fabricateOrBuy === 'buy' ? <><ShoppingCart className="w-3 h-3 mr-1" />Buy</> : <><Wrench className="w-3 h-3 mr-1" />Fabricate</>}
                           </Badge>
                           {analysed && <Badge className="bg-green-600/20 text-green-400 text-[10px]"><CheckCircle className="w-3 h-3 mr-1" />Analysed</Badge>}
+                          {stl && <Badge className="bg-primary/20 text-primary text-[10px]"><Box className="w-3 h-3 mr-1" />3D Ready</Badge>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{p.function}</p>
                         <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
@@ -359,6 +369,20 @@ export default function DesignGeneratorPage() {
                           <span>Qty: {p.quantity}</span>
                           <span>${p.estimatedCostUSD}</span>
                         </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {stl ? (
+                          <button onClick={() => setViewerPart(p)}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-primary/20 text-primary text-[10px] font-medium hover:bg-primary/30">
+                            <Box className="w-3 h-3" /> View 3D
+                          </button>
+                        ) : (
+                          <button onClick={() => generatePartSTL(p)} disabled={isGen || generatingPart !== null}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-secondary text-foreground text-[10px] font-medium hover:bg-secondary/80 disabled:opacity-50">
+                            {isGen ? <Loader2 className="w-3 h-3 animate-spin" /> : <Box className="w-3 h-3" />}
+                            Generate 3D
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
