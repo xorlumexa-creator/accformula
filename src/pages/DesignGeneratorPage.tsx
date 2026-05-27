@@ -431,6 +431,34 @@ export default function DesignGeneratorPage() {
           )}
         </div>
       </div>
+
+      {/* 3D Viewer Modal */}
+      {viewerPart && partStls[viewerPart.partNumber] && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setViewerPart(null)}>
+          <div className="w-full max-w-5xl h-[80vh] rounded-xl border border-primary/30 flex flex-col overflow-hidden" style={{ background: '#0a0a0a' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-border/30">
+              <div>
+                <h3 className="text-base font-bold text-primary font-display">{viewerPart.partName}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {viewerPart.material} · {viewerPart.dimensions?.x}×{viewerPart.dimensions?.y}×{viewerPart.dimensions?.z}mm · Source: {partStls[viewerPart.partNumber].source}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a href={partStls[viewerPart.partNumber].url} download={`${viewerPart.partName.replace(/\s+/g, '_')}.stl`}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90">
+                  <Download className="w-3 h-3" /> STL
+                </a>
+                <button onClick={() => setViewerPart(null)} className="p-1.5 rounded hover:bg-secondary">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 relative">
+              <CADViewer fileUrl={partStls[viewerPart.partNumber].url} fileType="stl" className="h-full" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
