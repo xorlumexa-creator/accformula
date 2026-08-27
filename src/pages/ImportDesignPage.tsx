@@ -220,52 +220,46 @@ export default function ImportDesignPage() {
     setError(null);
     setGeminiData(null);
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('material', material || selectedMaterial);
-    formData.append('force_n', String(parseFloat(force) * (forceMultiplier || 1)));
-    formData.append('force_dir', forceDir);
-    formData.append('operating_temp_c', operatingTemp);
-    formData.append('surface_finish', surfaceFinish || 'machined');
-    formData.append('reliability', String(reliability || 0.99));
-    formData.append('part_name', partName || file.name);
-
     try {
-      const resp = await fetch(`${BACKEND_URL}/analyze-part`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!resp.ok) {
-        if (resp.status === 503 || resp.status === 0) {
-          // Cold start
-          if (retryCount < 3) {
-            setRetryCount(r => r + 1);
-            setRetryCountdown(15);
-            setError('Engineering server is waking up... Auto-retrying.');
-            setBackendLoading(false);
-            setTimeout(() => analyzeFile(file, material, surfaceFinish, reliability, forceMultiplier), 15000);
-            return;
-          }
-        }
-        const errText = await resp.text().catch(() => 'Unknown error');
-        throw new Error(`Backend error ${resp.status}: ${errText}`);
+      if (!stlData) {
+        throw new Error('Model is still loading — wait for the 3D preview, then analyse.');
       }
 
-      const data: BackendData = await resp.json();
+      // Geometry measured locally from the loaded mesh
+      const data: BackendData = {
+        geometry: {
+          dimensions_mm: {
+            x: +stlData.boundingBox.width.toFixed(2),
+            y: +stlData.boundingBox.height.toFixed(2),
+            z: +stlData.boundingBox.depth.toFixed(2),
+          },
+          volume_mm3: +stlData.boundingBox.volume.toFixed(0),
+          surface_area_mm2: +stlData.surfaceArea.toFixed(0),
+          center_of_gravity: stlData.centerOfMass,
+          is_watertight: !stlData.hasHoles,
+          vertex_count: stlData.vertexCount,
+          face_count: stlData.triangleCount,
+        },
+        wall_thickness: { min_mm: +stlData.estimatedWallThickness.toFixed(2) },
+        material: material || selectedMaterial,
+        load_case: {
+          force_n: parseFloat(force) * (forceMultiplier || 1),
+          force_dir: forceDir,
+          operating_temp_c: operatingTemp,
+          surface_finish: surfaceFinish || 'machined',
+          reliability: reliability || 0.99,
+        },
+        mesh_quality: {
+          aspect_ratio: stlData.aspectRatio,
+          thin_section_percent: stlData.thinSectionPercent,
+          high_density_zones: stlData.highDensityZones,
+          symmetrical: stlData.symmetrical,
+        },
+        part_name: partName || file.name,
+      };
       setBackendData(data);
-      setRetryCount(0);
 
-      // Render generated STL if present
-      if (data.generated_stl_base64 && !modelUrl) {
-        const bytes = Uint8Array.from(atob(data.generated_stl_base64), c => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        setModelUrl(url);
-        setModelType('stl');
-      }
-
-      // Now send to Gemini for interpretation
+      // Send to Gemini for interpretation
       await callGeminiInterpret(data);
 
       // Save analysis
