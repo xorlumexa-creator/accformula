@@ -22,6 +22,7 @@ import NotFound from "./pages/NotFound";
 import CodeSectionPage from "./pages/CodeSectionPage";
 import ICWirePage from "./pages/ICWirePage";
 import PricingPage from "./pages/PricingPage";
+import MVPPage from "./pages/MVPPage";
 
 const queryClient = new QueryClient();
 
