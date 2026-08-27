@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const PYTHON_API = 'https://salman894552-lumexav8.hf.space/analyze-part';
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 interface PartGeometry {
@@ -66,20 +65,6 @@ const LOADING_MESSAGES = [
   'Placing issue markers...',
   'Generating inspection report...',
 ];
-
-/* ─── Python API ─── */
-async function fetchPythonGeometry(file: File): Promise<PartGeometry | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch(PYTHON_API, { method: 'POST', body: fd, signal: controller.signal });
-    clearTimeout(timeout);
-    if (!r.ok) return null;
-    return await r.json();
-  } catch { return null; }
-}
 
 /* ─── Three.js estimate fallback ─── */
 function estimateFromGeometry(geo: THREE.BufferGeometry): PartGeometry {
@@ -307,19 +292,12 @@ export default function AssemblyBuilderPage() {
     setHighlightedAnnotation(null);
     setIsUploading(true);
 
-    // Fetch Python geometry
-    const pyGeo = await fetchPythonGeometry(f);
-    if (pyGeo) {
-      setGeometry(pyGeo);
-      setGeoSource('python');
-    } else {
-      setGeoSource('estimated');
-      // Geometry will be estimated from Three.js when model loads
-    }
+    // Geometry is derived locally from the loaded mesh
+    setGeoSource('estimated');
     setIsUploading(false);
 
     // Auto-trigger analysis
-    runAnalysis(f, pyGeo);
+    runAnalysis(f, null);
   }, [projectContext, user]);
 
   const handleBoundsReady = useCallback((bb: THREE.Box3) => {
@@ -374,7 +352,7 @@ USER PROJECT CONTEXT:
 Project: ${projectContext?.name || 'Not specified'}
 Budget: ${projectContext?.budget || 'Not specified'}
 
-REAL GEOMETRIC DATA FROM PYTHON TRIMESH BACKEND:
+GEOMETRIC DATA MEASURED FROM THE UPLOADED MESH:
 Filename: ${f.name}
 Real Dimensions: ${dims.x}mm x ${dims.y}mm x ${dims.z}mm
 Real Volume: ${vol}mm3
