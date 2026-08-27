@@ -1,4 +1,1 @@
 project_id = "yunucpjuhlbahxfuczlv"
-
-[functions.generate-part-stl]
-verify_jwt = false

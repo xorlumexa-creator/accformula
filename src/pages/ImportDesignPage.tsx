@@ -19,7 +19,6 @@ import { useDesignAnalyses } from '@/hooks/useLocalStorage';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 
-const BACKEND_URL = 'https://salman894552-lumexav8.hf.space';
 const INTERPRET_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gemini-interpret`;
 
 const ACCURACY_LEVELS = [
@@ -31,7 +30,7 @@ const ACCURACY_LEVELS = [
 ];
 
 const LOADING_STEPS = [
-  'Uploading to analysis engine...',
+  'Reading mesh geometry...',
   'Running geometric analysis...',
   'Measuring wall thickness...',
   'Running FEA simulation...',
@@ -111,9 +110,6 @@ export default function ImportDesignPage() {
   // Active tab
   const [activeTab, setActiveTab] = useState<string>('overview');
 
-  // Cold start retry
-  const [retryCount, setRetryCount] = useState(0);
-  const [retryCountdown, setRetryCountdown] = useState(0);
 
   // Error
   const [error, setError] = useState<string | null>(null);
@@ -129,13 +125,6 @@ export default function ImportDesignPage() {
     const iv = setInterval(() => setLoadingStep(s => Math.min(s + 1, LOADING_STEPS.length - 1)), 3000);
     return () => clearInterval(iv);
   }, [backendLoading]);
-
-  // Retry countdown
-  useEffect(() => {
-    if (retryCountdown <= 0) return;
-    const iv = setInterval(() => setRetryCountdown(c => c - 1), 1000);
-    return () => clearInterval(iv);
-  }, [retryCountdown]);
 
   const loadModel = useCallback((file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -347,7 +336,6 @@ export default function ImportDesignPage() {
       {error && (
         <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-4">
           <p className="text-sm text-orange-400">{error}</p>
-          {retryCountdown > 0 && <p className="text-xs text-muted-foreground mt-1">Retrying in {retryCountdown}s...</p>}
         </div>
       )}
 
