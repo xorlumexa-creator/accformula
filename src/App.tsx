@@ -65,6 +65,7 @@ const App = () => (
                 <Route path="/code-section" element={<CodeSectionPage />} />
                 <Route path="/ic-wire" element={<ICWirePage />} />
                 <Route path="/pricing" element={<PricingPage />} />
+                <Route path="/mvp" element={<MVPPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
