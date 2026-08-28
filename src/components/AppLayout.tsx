@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Rocket, Box, Code2, Cpu, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Rocket, Box, Code2, Cpu, CreditCard, FlaskConical } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import lumexaLogo from '@/assets/lumexa-logo.webp';
 
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/fea', icon: Microscope, label: 'FEA' },
   { to: '/code-section', icon: Code2, label: 'Code Section' },
   { to: '/ic-wire', icon: Cpu, label: 'IC & Wire' },
+  { to: '/mvp', icon: FlaskConical, label: 'MVP' },
   { to: '/upload', icon: Upload, label: 'Telemetry' },
   { to: '/chat', icon: MessageSquare, label: 'AI Coach' },
   { to: '/pricing', icon: CreditCard, label: 'Pricing' },
