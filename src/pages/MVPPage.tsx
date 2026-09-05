@@ -85,7 +85,7 @@ export default function MVPPage() {
       const form = new FormData();
       form.append('prompt', prompt);
       form.append('material', material);
-      form.append('max_iterations', '3');
+      form.append('max_iterations', '6');
 
       const res = await fetch(`${BACKEND_URL}/generate-validate-refine`, {
         method: 'POST',
