@@ -25,6 +25,7 @@ export default function ProjectPlanPage() {
   const [streaming, setStreaming] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [profile, setProfile] = useState<any>(null);
+  const [pendingBrief, setPendingBrief] = useState<{ brief: any; history: ChatMsg[] } | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -119,14 +120,31 @@ export default function ProjectPlanPage() {
             const briefData = JSON.parse(jsonMatch[1]);
             // Remove the GENERATE_BRIEF_NOW from displayed message
             const cleanMsg = full.replace(/GENERATE_BRIEF_NOW[\s\S]*$/, '').trim();
-            setMessages(prev => {
-              const updated = [...prev];
-              if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
-                updated[updated.length - 1].content = cleanMsg || "Great! Generating your full engineering package now...";
-              }
-              return updated;
-            });
-            await handleGenerate(briefData, [...newMessages, { role: 'assistant' as const, content: cleanMsg }]);
+            const history = [...newMessages, { role: 'assistant' as const, content: cleanMsg }];
+
+            if (briefData.feasible === false) {
+              // Gemini thinks this isn't physically buildable — stop and let the user decide.
+              setMessages(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1].content = cleanMsg || "Here's what I found:";
+                }
+                return [...updated, {
+                  role: 'assistant',
+                  content: `⚠️ **This might not be physically buildable.**\n\n${briefData.feasibilityReason || "The requirements as described conflict with real-world physics or materials."}\n\nYou can adjust the idea, or tell me to build it anyway and I'll proceed regardless.`,
+                }];
+              });
+              setPendingBrief({ brief: briefData, history });
+            } else {
+              setMessages(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1].content = cleanMsg || "Great! Generating your full engineering package now...";
+                }
+                return updated;
+              });
+              await handleGenerate(briefData, history);
+            }
           } catch (e) {
             console.error('Failed to parse brief JSON:', e);
           }
@@ -215,6 +233,7 @@ export default function ProjectPlanPage() {
           price: e.price || 0,
           quantity: e.quantity || 1,
           purpose: e.purpose || '',
+          dimensions: e.dimensions || '',
           sort_order: i,
         }));
         await supabase.from('project_electronics').insert(elecToInsert);
@@ -260,6 +279,19 @@ export default function ProjectPlanPage() {
       }]);
     }
     setGenerating(false);
+  };
+
+  const buildAnyway = () => {
+    if (!pendingBrief) return;
+    const { brief, history } = pendingBrief;
+    setPendingBrief(null);
+    setMessages(prev => [...prev, { role: 'user', content: "Build it anyway." }]);
+    handleGenerate(brief, history);
+  };
+
+  const refineIdea = () => {
+    setPendingBrief(null);
+    setMessages(prev => [...prev, { role: 'assistant', content: "No problem — tell me what you'd like to change about the idea." }]);
   };
 
   return (
@@ -311,6 +343,14 @@ export default function ProjectPlanPage() {
         )}
       </div>
 
+      {/* Feasibility choice */}
+      {pendingBrief && !generating && (
+        <div className="flex gap-2 shrink-0">
+          <Button variant="outline" className="flex-1" onClick={refineIdea}>Let's adjust it</Button>
+          <Button className="flex-1" onClick={buildAnyway}>Build anyway</Button>
+        </div>
+      )}
+
       {/* Input */}
       <div className="flex gap-2 shrink-0">
         <Input
@@ -318,10 +358,10 @@ export default function ProjectPlanPage() {
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
           placeholder={generating ? "Generating your build plan..." : "Describe your project..."}
-          disabled={streaming || generating}
+          disabled={streaming || generating || !!pendingBrief}
           className="flex-1"
         />
-        <Button size="icon" onClick={() => sendMessage(input)} disabled={streaming || generating || !input.trim()}>
+        <Button size="icon" onClick={() => sendMessage(input)} disabled={streaming || generating || !!pendingBrief || !input.trim()}>
           {streaming || generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </Button>
       </div>
