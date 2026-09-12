@@ -49,7 +49,9 @@ SILENT TRANSLATION as user answers:
 "handle rain" → IP54 | "fully waterproof" → IP67-IP68
 "never built before" → beginner level, maximum detail guides
 
-When you have gathered enough information (at least: function, size, environment, control, power, budget, user level), present a requirements summary:
+When you have gathered enough information (at least: function, size, environment, control, power, budget, user level), silently think through whether this device is physically possible to build in the real world — check for violations of physics (conservation of energy/momentum, thermodynamics), impossible material requirements, or self-contradictory requirements. Only flag something as not feasible for a genuine physical impossibility or contradiction — being expensive, difficult, or ambitious is NEVER a reason to flag it. Do not show this reasoning to the user.
+
+Then present a requirements summary:
 
 "Perfect! Here's what I'm building for you. Let me know if anything needs changing:
 📋 YOUR PROJECT: [NAME]
@@ -66,7 +68,9 @@ When you have gathered enough information (at least: function, size, environment
 Does this look right? Say 'Generate' to create your full engineering package!"
 
 When user confirms or says "Generate", respond with EXACTLY: GENERATE_BRIEF_NOW followed by a JSON object containing all gathered requirements:
-{"projectName":"...","description":"...","category":"...","purpose":"...","environment":"...","budget":"...","targetWeight":"...","targetSize":"...","powerSource":"...","controlMethod":"...","microcontroller":"...","has3dPrinter":false,"connectivity":"...","userLevel":"...","specialRequirements":"...","assumptions":[]}
+{"projectName":"...","description":"...","category":"...","purpose":"...","environment":"...","budget":"...","targetWeight":"...","targetSize":"...","powerSource":"...","controlMethod":"...","microcontroller":"...","has3dPrinter":false,"connectivity":"...","userLevel":"...","specialRequirements":"...","assumptions":[],"feasible":true,"feasibilityReason":"..."}
+
+If you determined the device is NOT physically feasible, set "feasible":false and put a clear, friendly, 1-2 sentence explanation of exactly why in "feasibilityReason" — still fill in the rest of the JSON as best you can. If it IS feasible, set "feasible":true and leave "feasibilityReason" as an empty string.
 
 IMPORTANT: Do NOT mention AI models, APIs, or providers. You are Lumexa's internal engineering system.`;
 
@@ -86,6 +90,8 @@ FEASIBILITY CHECK before generating:
 - User level can handle this, Tools available sufficient, Parts purchasable, Budget covers scope
 
 AI BRAIN GAP FILLING: Fill ALL remaining gaps using engineering judgment. For EVERY unfilled requirement use project type to infer specs, similar real products as reference, engineering best practices. Mark assumptions clearly.
+
+PART GRANULARITY — Break every subsystem down into the smallest individual manufacturable parts, the way a real CAD assembly tree would list them. NEVER bundle multiple distinct parts into one entry — split a "mounting assembly" into its actual pieces: e.g. "Motor mount bracket (left)", "Motor mount bracket (right)", "Corner gusset/fillet", "Shaft spacer", "Standoff M3x10". Every bracket, arm, plate, fillet, gusset, spacer, and standoff gets its own entry with its own material, dimensions, and cost. For anything beyond a trivial project this should produce at least 15-40 distinct part entries — do not summarize or compress into fewer, broader items.
 
 Return ONLY valid JSON:
 {
@@ -109,7 +115,7 @@ Return ONLY valid JSON:
     }
   ],
   "electronics": [
-    {"componentName":"...","modelRecommendation":"...","whereToBuy":"...","price":0,"quantity":1,"purpose":"...","subsystem":"..."}
+    {"componentName":"...","modelRecommendation":"...","whereToBuy":"...","price":0,"quantity":1,"purpose":"...","subsystem":"...","dimensions":"package type + physical size, e.g. 'SOIC-8, 4.9x3.9x1.75mm'"}
   ],
   "recommendations": {
     "criticalConsiderations": ["..."],
@@ -121,6 +127,57 @@ Return ONLY valid JSON:
 
 Wire gauge rules: Signal 28AWG, Logic power 22AWG, Motor power 16-14AWG, Battery mains 12-10AWG.
 Include EVERY component needed. Be specific with real product names and prices in user's local currency. Return ONLY valid JSON.`;
+
+// Uses Groq's compound model (built-in web search) to replace best-guess electronics
+// pricing, sourcing, AND physical package dimensions with real, verified data pulled
+// from actual datasheets/product pages — boosted to the user's country.
+// Gracefully no-ops (returns the original list) if GROQ_API_KEY isn't set or anything fails,
+// so this is safe to wire in before the key exists.
+async function enrichElectronicsData(electronics: any[], country?: string) {
+  const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+  if (!GROQ_API_KEY || !Array.isArray(electronics) || !electronics.length) return electronics;
+
+  try {
+    const search_settings: Record<string, string> = {};
+    if (country) search_settings.country = String(country).toLowerCase();
+
+    const groqResp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "groq/compound",
+        messages: [
+          {
+            role: "system",
+            content: `You are a component sourcing, pricing, and dimensioning specialist. You will receive a JSON array of electronic components for a hardware project. For EACH component, use web search to find a real, currently available product and confirm from its actual datasheet or product listing page: its exact model/part number, a realistic current price, a real place to buy it${country ? ` for someone located in ${country}` : ""}, and its true physical package dimensions. For "dimensions", give the package type plus physical size in millimeters exactly as the datasheet states it (e.g. "SOIC-8, 4.9x3.9x1.75mm", "TO-220, 10.0x4.8x8.9mm", "Arduino Nano module, 45x18x7mm") — do not guess or reuse a generic estimate if the datasheet gives an exact figure. Keep the exact same array structure and field names as the input (componentName, modelRecommendation, whereToBuy, price, quantity, purpose, subsystem, dimensions). If you genuinely cannot find real data for an item after searching, keep its original values. Return ONLY the raw JSON array — no markdown fences, no commentary.`,
+          },
+          { role: "user", content: JSON.stringify(electronics) },
+        ],
+        ...(Object.keys(search_settings).length ? { search_settings } : {}),
+        compound_custom: {
+          tools: { enabled_tools: ["web_search", "visit_website"] },
+        },
+      }),
+    });
+
+    if (!groqResp.ok) {
+      console.error("Groq pricing enrichment failed:", groqResp.status, await groqResp.text());
+      return electronics;
+    }
+
+    const groqResult = await groqResp.json();
+    const raw = groqResult.choices?.[0]?.message?.content || "";
+    const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const enriched = JSON.parse(cleaned);
+    return Array.isArray(enriched) && enriched.length ? enriched : electronics;
+  } catch (e) {
+    console.error("Groq pricing enrichment error:", e);
+    return electronics;
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -187,6 +244,11 @@ serve(async (req) => {
       } catch {
         parsed = { error: "Failed to parse brief", raw: content };
       }
+
+      if (mode === "generate_parts" && !parsed.error && Array.isArray(parsed.electronics) && parsed.electronics.length) {
+        parsed.electronics = await enrichElectronicsData(parsed.electronics, briefData?.country);
+      }
+
       return new Response(JSON.stringify(parsed), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
