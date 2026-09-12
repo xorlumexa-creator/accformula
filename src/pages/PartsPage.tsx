@@ -17,7 +17,7 @@ interface Part {
 interface Electronic {
   id: string; component_name: string; model_recommendation: string;
   where_to_buy: string; price: number; quantity: number; purpose: string;
-  status: string; sort_order: number;
+  dimensions: string; status: string; sort_order: number;
 }
 
 const statusColors: Record<string, string> = {
@@ -145,6 +145,9 @@ export default function PartsPage() {
                 <span className="text-primary">${e.price} × {e.quantity}</span>
                 <span>{e.purpose}</span>
               </div>
+              {e.dimensions && (
+                <p className="text-xs text-muted-foreground/70 mt-1">📐 {e.dimensions}</p>
+              )}
             </button>
           ))}
           {electronics.length === 0 && (
