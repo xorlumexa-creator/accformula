@@ -184,11 +184,11 @@ serve(async (req) => {
 
   try {
     const { messages, mode, briefData } = await req.json();
-    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
+    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
 
     let systemPrompt = "";
-    const model = "nvidia/nemotron-3-ultra-550b-a55b:free";
+    const model = "openai/gpt-oss-120b";
 
     if (mode === "interview") {
       systemPrompt = MASTER_INTERVIEW_PROMPT;
@@ -196,13 +196,11 @@ serve(async (req) => {
       systemPrompt = buildGeneratePartsPrompt(briefData);
     }
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://accformula-8h6o.vercel.app",
-        "X-Title": "Lumexa",
       },
       body: JSON.stringify({
         model,
@@ -262,3 +260,4 @@ serve(async (req) => {
     });
   }
 });
+    
