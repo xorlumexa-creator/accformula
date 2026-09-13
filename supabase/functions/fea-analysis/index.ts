@@ -10,8 +10,8 @@ serve(async (req) => {
 
   try {
     const { feaData, software, analysisTypes } = await req.json();
-    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
+    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
 
     const systemPrompt = `You are an advanced FEA (Finite Element Analysis) interpretation engine inside the Lumexa platform.
 
@@ -58,16 +58,14 @@ IMPORTANT:
 • Do NOT mention AI models or APIs
 • Return ONLY the JSON object, no extra text`;
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://accformula-8h6o.vercel.app",
-        "X-Title": "Lumexa",
       },
       body: JSON.stringify({
-        model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+        model: "openai/gpt-oss-120b",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Analyze these FEA results:\n\n${feaData}` },
