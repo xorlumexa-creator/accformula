@@ -209,6 +209,7 @@ serve(async (req) => {
           ...messages,
         ],
         stream: mode === "interview",
+        max_tokens: mode === "generate_parts" ? 16000 : undefined,
       }),
     });
 
@@ -242,7 +243,16 @@ serve(async (req) => {
         const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         parsed = JSON.parse(cleaned);
       } catch {
-        parsed = { error: "Failed to parse brief", raw: content };
+        // Fallback: the model may have added preamble/trailing text around the JSON —
+        // pull out the largest {...} block instead of giving up immediately.
+        const match = content.match(/\{[\s\S]*\}/);
+        if (match) {
+          try { parsed = JSON.parse(match[0]); } catch { parsed = null; }
+        }
+        if (!parsed) {
+          console.error("design-generator: failed to parse brief. finish_reason:", result.choices?.[0]?.finish_reason, "raw content:", content);
+          parsed = { error: "Failed to parse brief", raw: content };
+        }
       }
 
       if (mode === "generate_parts" && !parsed.error && Array.isArray(parsed.electronics) && parsed.electronics.length) {
