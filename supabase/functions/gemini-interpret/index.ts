@@ -99,22 +99,22 @@ serve(async (req) => {
 
   try {
     const { backendData } = await req.json();
-    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
+    const PUTER_AUTH_TOKEN = Deno.env.get("PUTER_AUTH_TOKEN");
+    if (!PUTER_AUTH_TOKEN) throw new Error("PUTER_AUTH_TOKEN is not configured");
 
     // Use gemini_context field from backend if available, otherwise stringify cleaned data
     const cleanData = { ...backendData };
     delete cleanData.generated_stl_base64;
     const engineeringData = backendData.gemini_context || JSON.stringify(cleanData, null, 2);
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await fetch("https://api.puter.com/puterai/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
+        Authorization: `Bearer ${PUTER_AUTH_TOKEN}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
+        model: "nvidia/nemotron-3-super-120b-a12b",
         messages: [
           { role: "system", content: GEMINI_SYSTEM_PROMPT },
           {
