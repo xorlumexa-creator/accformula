@@ -11,7 +11,7 @@ import {
 
 interface Part {
   id: string; part_name: string; material: string; manufacturing_method: string;
-  estimated_cost: number; complexity: string; status: string; sort_order: number;
+  estimated_cost: number; complexity: string; dimensions: string; status: string; sort_order: number;
 }
 
 interface Electronic {
@@ -117,6 +117,9 @@ export default function PartsPage() {
                   <span className="text-primary">${part.estimated_cost}</span>
                   <ArrowRight className="w-3 h-3 ml-auto text-primary" />
                 </div>
+                {part.dimensions && (
+                  <p className="text-xs text-muted-foreground/70 mt-1">📐 {part.dimensions}</p>
+                )}
               </div>
             </Link>
           ))}
