@@ -7,8 +7,10 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Rocket, Bot, User, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { streamPuterChat, puterChatJSON, stripJsonFences } from '@/lib/puterAI';
+import { MASTER_INTERVIEW_PROMPT, buildGeneratePartsPrompt, buildRefinePartsPrompt } from '@/lib/prompts';
 
-const GEN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
+const ENRICH_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enrich-electronics`;
 
 
 interface ChatMsg {
@@ -61,56 +63,23 @@ export default function ProjectPlanPage() {
     setStreaming(true);
 
     try {
-      const resp = await fetch(GEN_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-          mode: 'interview',
-        }),
-      });
-
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData.error || 'Interview failed');
-      }
-
-      const reader = resp.body!.getReader();
-      const decoder = new TextDecoder();
-      let full = '';
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf('\n')) !== -1) {
-          let line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (!line.startsWith('data: ')) continue;
-          const json = line.slice(6).trim();
-          if (json === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(json);
-            const c = parsed.choices?.[0]?.delta?.content;
-            if (c) {
-              full += c;
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.role === 'assistant') {
-                  return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: full } : m);
-                }
-                return [...prev, { role: 'assistant', content: full }];
-              });
+      let liveFull = '';
+      const full = await streamPuterChat(
+        [
+          { role: 'system', content: MASTER_INTERVIEW_PROMPT },
+          ...newMessages.map(m => ({ role: m.role, content: m.content })),
+        ],
+        (chunk) => {
+          liveFull += chunk;
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role === 'assistant') {
+              return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: liveFull } : m);
             }
-          } catch {}
+            return [...prev, { role: 'assistant', content: liveFull }];
+          });
         }
-      }
+      );
 
       // Check if AI wants to generate
       if (full.includes('GENERATE_BRIEF_NOW')) {
@@ -174,18 +143,54 @@ export default function ProjectPlanPage() {
         country: profile.country,
       };
 
-      const resp = await fetch(GEN_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({ messages: [], mode: 'generate_parts', briefData: enrichedBrief }),
-      });
+      const resp = await puterChatJSON([
+        { role: 'system', content: buildGeneratePartsPrompt(enrichedBrief) },
+        { role: 'user', content: 'Generate the complete build plan now.' },
+      ]);
 
-      if (!resp.ok) throw new Error('Failed to generate parts list');
-      const result = await resp.json();
+      let result: any;
+      try {
+        result = JSON.parse(stripJsonFences(resp));
+      } catch {
+        throw new Error('Failed to generate parts list');
+      }
       if (result.error) throw new Error(result.error);
+
+      // Electronics pricing/dimensions enrichment needs the Groq secret, so that
+      // one step still runs server-side — everything else already happened client-side.
+      if (result.electronics?.length) {
+        try {
+          const enrichResp = await fetch(ENRICH_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({ electronics: result.electronics, country: profile.country }),
+          });
+          if (enrichResp.ok) {
+            const enrichData = await enrichResp.json();
+            if (enrichData.electronics?.length) result.electronics = enrichData.electronics;
+          }
+        } catch (e) {
+          console.error('Electronics enrichment failed, using original estimates:', e);
+        }
+      }
+
+      // Fuse the now-real, verified component dimensions/specs back into the mechanical
+      // parts — enclosures, brackets, standoffs and wire runs get corrected to actually
+      // fit and support what will really be used, instead of the first-pass guesses.
+      if (result.parts?.length && result.electronics?.length) {
+        try {
+          const refineResp = await puterChatJSON([
+            { role: 'user', content: buildRefinePartsPrompt(result.parts, result.electronics, enrichedBrief) },
+          ]);
+          const refinedParts = JSON.parse(stripJsonFences(refineResp));
+          if (Array.isArray(refinedParts) && refinedParts.length) result.parts = refinedParts;
+        } catch (e) {
+          console.error('Part-fit refinement failed, keeping original part dimensions:', e);
+        }
+      }
 
       // Create project
       const { data: projectData, error: projError } = await supabase.from('projects').insert({
@@ -217,6 +222,7 @@ export default function ProjectPlanPage() {
           manufacturing_method: p.manufacturingMethod || '',
           estimated_cost: p.estimatedCostUSD || p.estimatedCost || 0,
           complexity: p.complexity || 'Beginner',
+          dimensions: p.dimensions || '',
           sort_order: i,
         }));
         await supabase.from('project_parts').insert(partsToInsert);
