@@ -122,7 +122,6 @@ export type Database = {
         Row: {
           component_name: string
           created_at: string
-          dimensions: string | null
           id: string
           model_recommendation: string | null
           price: number | null
@@ -138,7 +137,6 @@ export type Database = {
         Insert: {
           component_name?: string
           created_at?: string
-          dimensions?: string | null
           id?: string
           model_recommendation?: string | null
           price?: number | null
@@ -154,7 +152,6 @@ export type Database = {
         Update: {
           component_name?: string
           created_at?: string
-          dimensions?: string | null
           id?: string
           model_recommendation?: string | null
           price?: number | null
@@ -185,6 +182,7 @@ export type Database = {
           estimated_cost: number | null
           fix_guide: string | null
           id: string
+          image_url: string | null
           manufacturing_method: string | null
           material: string | null
           part_name: string
@@ -201,6 +199,7 @@ export type Database = {
           estimated_cost?: number | null
           fix_guide?: string | null
           id?: string
+          image_url?: string | null
           manufacturing_method?: string | null
           material?: string | null
           part_name?: string
@@ -217,6 +216,7 @@ export type Database = {
           estimated_cost?: number | null
           fix_guide?: string | null
           id?: string
+          image_url?: string | null
           manufacturing_method?: string | null
           material?: string | null
           part_name?: string
@@ -298,6 +298,7 @@ export type Database = {
           description: string | null
           environment: string | null
           has_3d_printer: boolean | null
+          hero_image_url: string | null
           id: string
           microcontroller: string | null
           power_source: string | null
@@ -320,6 +321,7 @@ export type Database = {
           description?: string | null
           environment?: string | null
           has_3d_printer?: boolean | null
+          hero_image_url?: string | null
           id?: string
           microcontroller?: string | null
           power_source?: string | null
@@ -342,6 +344,7 @@ export type Database = {
           description?: string | null
           environment?: string | null
           has_3d_printer?: boolean | null
+          hero_image_url?: string | null
           id?: string
           microcontroller?: string | null
           power_source?: string | null
@@ -598,4 +601,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-  
