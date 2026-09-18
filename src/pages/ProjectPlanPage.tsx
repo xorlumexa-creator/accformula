@@ -7,15 +7,64 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Rocket, Bot, User, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { streamPuterChat, puterChatJSON, stripJsonFences } from '@/lib/puterAI';
-import { MASTER_INTERVIEW_PROMPT, buildGeneratePartsPrompt, buildRefinePartsPrompt } from '@/lib/prompts';
 
+const DESIGN_GENERATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
 const ENRICH_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enrich-electronics`;
-
+const AUTH_HEADER = `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
 
 interface ChatMsg {
   role: 'user' | 'assistant';
   content: string;
+}
+
+// Streams the interview turn from design-generator (Groq, streamed as SSE) and reports
+// each text delta as it arrives, same as before — just server-side now instead of Puter.
+async function streamInterview(chatMessages: { role: string; content: string }[], onChunk: (delta: string) => void): Promise<string> {
+  const resp = await fetch(DESIGN_GENERATOR_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: AUTH_HEADER },
+    body: JSON.stringify({ messages: chatMessages, mode: 'interview' }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error(errBody.error || 'Chat failed');
+  }
+  const reader = resp.body?.getReader();
+  const decoder = new TextDecoder();
+  let full = '';
+  let buffer = '';
+  if (!reader) return full;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === '[DONE]' || !data) continue;
+      try {
+        const json = JSON.parse(data);
+        const delta = json.choices?.[0]?.delta?.content || '';
+        if (delta) { full += delta; onChunk(delta); }
+      } catch { /* ignore partial/incomplete SSE lines */ }
+    }
+  }
+  return full;
+}
+
+// Calls design-generator in a non-streaming JSON mode (generate_parts / refine_parts).
+async function callDesignGenerator(mode: string, body: Record<string, any>): Promise<any> {
+  const resp = await fetch(DESIGN_GENERATOR_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: AUTH_HEADER },
+    body: JSON.stringify({ mode, ...body }),
+  });
+  const data = await resp.json();
+  if (!resp.ok || data.error) throw new Error(data.error || 'Request failed');
+  return data;
 }
 
 export default function ProjectPlanPage() {
@@ -64,11 +113,8 @@ export default function ProjectPlanPage() {
 
     try {
       let liveFull = '';
-      const full = await streamPuterChat(
-        [
-          { role: 'system', content: MASTER_INTERVIEW_PROMPT },
-          ...newMessages.map(m => ({ role: m.role, content: m.content })),
-        ],
+      const full = await streamInterview(
+        newMessages.map(m => ({ role: m.role, content: m.content })),
         (chunk) => {
           liveFull += chunk;
           setMessages(prev => {
@@ -143,18 +189,10 @@ export default function ProjectPlanPage() {
         country: profile.country,
       };
 
-      const resp = await puterChatJSON([
-        { role: 'system', content: buildGeneratePartsPrompt(enrichedBrief) },
-        { role: 'user', content: 'Generate the complete build plan now.' },
-      ]);
-
-      let result: any;
-      try {
-        result = JSON.parse(stripJsonFences(resp));
-      } catch {
-        throw new Error('Failed to generate parts list');
-      }
-      if (result.error) throw new Error(result.error);
+      const result = await callDesignGenerator('generate_parts', {
+        briefData: enrichedBrief,
+        messages: [{ role: 'user', content: 'Generate the complete build plan now.' }],
+      });
 
       // Electronics pricing/dimensions enrichment needs the Groq secret, so that
       // one step still runs server-side — everything else already happened client-side.
@@ -162,10 +200,7 @@ export default function ProjectPlanPage() {
         try {
           const enrichResp = await fetch(ENRICH_URL, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            },
+            headers: { 'Content-Type': 'application/json', Authorization: AUTH_HEADER },
             body: JSON.stringify({ electronics: result.electronics, country: profile.country }),
           });
           if (enrichResp.ok) {
@@ -182,11 +217,12 @@ export default function ProjectPlanPage() {
       // fit and support what will really be used, instead of the first-pass guesses.
       if (result.parts?.length && result.electronics?.length) {
         try {
-          const refineResp = await puterChatJSON([
-            { role: 'user', content: buildRefinePartsPrompt(result.parts, result.electronics, enrichedBrief) },
-          ]);
-          const refinedParts = JSON.parse(stripJsonFences(refineResp));
-          if (Array.isArray(refinedParts) && refinedParts.length) result.parts = refinedParts;
+          const refined = await callDesignGenerator('refine_parts', {
+            parts: result.parts,
+            electronics: result.electronics,
+            briefData: enrichedBrief,
+          });
+          if (Array.isArray(refined) && refined.length) result.parts = refined;
         } catch (e) {
           console.error('Part-fit refinement failed, keeping original part dimensions:', e);
         }
@@ -258,8 +294,6 @@ export default function ProjectPlanPage() {
       taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: 'Complete Assembly', estimated_hours: 3, phase: 5, sort_order: taskNum });
       taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: 'Test & Calibrate', estimated_hours: 2, phase: 6, sort_order: taskNum });
       await supabase.from('project_tasks').insert(taskInserts);
-
-      // Hero image generation removed — no image generation in v7
 
       // Show feasibility summary
       if (result.feasibility) {

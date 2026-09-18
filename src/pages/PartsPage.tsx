@@ -1,17 +1,25 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import AdSenseBanner from '@/components/AdSenseBanner';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Link, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
+import { Canvas, useLoader } from '@react-three/fiber';
+import { OrbitControls, Center, Grid } from '@react-three/drei';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { toast } from 'sonner';
 import {
-  Box, CheckCircle2, Circle, ArrowRight, DollarSign
+  Box, CheckCircle2, Circle, ArrowRight, DollarSign, Boxes, Loader2, Download, ChevronDown, ChevronUp
 } from 'lucide-react';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
 interface Part {
   id: string; part_name: string; material: string; manufacturing_method: string;
   estimated_cost: number; complexity: string; dimensions: string; status: string; sort_order: number;
+  stl_base64?: string | null; stl_quality_passed?: boolean | null; stl_iterations_used?: number | null;
 }
 
 interface Electronic {
@@ -31,6 +39,46 @@ const statusColors: Record<string, string> = {
   'Installed': 'border-primary/30 text-primary',
 };
 
+// Maps the free-text material string our AI generates (e.g. "6061 Aluminum",
+// "ABS plastic") onto the fixed enum the STL-generation backend accepts.
+function normalizeMaterial(raw: string): string {
+  const s = (raw || '').toLowerCase();
+  if (s.includes('titanium')) return 'titanium_grade5';
+  if (s.includes('steel')) return 'steel_1045';
+  if (s.includes('abs') || s.includes('plastic') || s.includes('pla') || s.includes('nylon') || s.includes('petg') || s.includes('polymer')) return 'abs_plastic';
+  return 'aluminum_6061';
+}
+
+function buildStlPrompt(part: Part, project: any): string {
+  return `${part.part_name} \u2014 one individual mechanical part for a ${project?.project_name || 'hardware'} project (${project?.description || project?.purpose || 'no further project description'}).
+Dimensions: ${part.dimensions || 'infer reasonable dimensions for a part of this type and function'}.
+Manufacturing method: ${part.manufacturing_method || 'CNC machining or 3D printing, whichever suits this part'}.
+Design complexity level: ${part.complexity || 'Beginner'}.
+Generate a precise, manufacturable CAD model for this exact single part only \u2014 not an assembly, not other parts.`;
+}
+
+function base64ToObjectUrl(b64: string) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+}
+
+function STLMesh({ url }: { url: string }) {
+  const geometry = useLoader(STLLoader, url);
+  useMemo(() => {
+    geometry.computeVertexNormals();
+    geometry.center();
+  }, [geometry]);
+  return (
+    <Center>
+      <mesh geometry={geometry} castShadow receiveShadow>
+        <meshStandardMaterial color="#b0b0b8" metalness={0.35} roughness={0.45} />
+      </mesh>
+    </Center>
+  );
+}
+
 export default function PartsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -39,10 +87,19 @@ export default function PartsPage() {
   const [electronics, setElectronics] = useState<Electronic[]>([]);
   const [project, setProject] = useState<any>(null);
 
+  const [stlLoading, setStlLoading] = useState<Record<string, boolean>>({});
+  const [stlUrls, setStlUrls] = useState<Record<string, string>>({});
+  const [expandedPartId, setExpandedPartId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!user) return;
     loadData();
   }, [user]);
+
+  // Revoke blob URLs on unmount to avoid leaking memory
+  useEffect(() => () => {
+    Object.values(stlUrls).forEach(url => URL.revokeObjectURL(url));
+  }, []);
 
   const loadData = async () => {
     if (!user) return;
@@ -65,6 +122,77 @@ export default function PartsPage() {
     const next = current === 'Not Purchased' ? 'Purchased' : current === 'Purchased' ? 'Installed' : 'Not Purchased';
     await supabase.from('project_electronics').update({ status: next }).eq('id', id);
     setElectronics(prev => prev.map(e => e.id === id ? { ...e, status: next } : e));
+  };
+
+  // Prepares a blob URL for a part's STL, from freshly-generated data or from what
+  // was already saved in the DB, and expands that part's preview panel.
+  const showStl = (part: Part, base64: string) => {
+    setStlUrls(prev => {
+      if (prev[part.id]) URL.revokeObjectURL(prev[part.id]);
+      return { ...prev, [part.id]: base64ToObjectUrl(base64) };
+    });
+    setExpandedPartId(part.id);
+  };
+
+  const toggleExpand = (part: Part, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (expandedPartId === part.id) { setExpandedPartId(null); return; }
+    if (part.stl_base64 && !stlUrls[part.id]) { showStl(part, part.stl_base64); return; }
+    setExpandedPartId(part.id);
+  };
+
+  const handleGenerateStl = async (part: Part, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!BACKEND_URL) { toast.error('STL backend is not configured (VITE_BACKEND_URL missing).'); return; }
+    if (stlLoading[part.id]) return;
+
+    setStlLoading(prev => ({ ...prev, [part.id]: true }));
+    setExpandedPartId(part.id);
+
+    try {
+      const form = new FormData();
+      form.append('prompt', buildStlPrompt(part, project));
+      form.append('material', normalizeMaterial(part.material));
+      form.append('max_iterations', '3');
+
+      const res = await fetch(`${BACKEND_URL}/generate-validate-refine`, {
+        method: 'POST',
+        body: form,
+      });
+
+      const text = await res.text();
+      if (!res.ok) {
+        let message = text;
+        try {
+          const parsed = JSON.parse(text);
+          message = parsed.detail ?? parsed.error ?? parsed.message ?? text;
+        } catch { /* keep raw text */ }
+        throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+      }
+
+      const data = JSON.parse(text);
+      const passed = !!data.refinement?.passed_quality_gate;
+      const iterations = data.refinement?.iterations_used ?? null;
+
+      await supabase.from('project_parts').update({
+        stl_base64: data.generated_stl_base64,
+        stl_quality_passed: passed,
+        stl_iterations_used: iterations,
+      }).eq('id', part.id);
+
+      setParts(prev => prev.map(p => p.id === part.id
+        ? { ...p, stl_base64: data.generated_stl_base64, stl_quality_passed: passed, stl_iterations_used: iterations }
+        : p));
+
+      showStl(part, data.generated_stl_base64);
+      toast.success(passed ? 'STL generated — passed quality checks.' : 'STL generated, but flagged in review — check the preview.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStlLoading(prev => ({ ...prev, [part.id]: false }));
+    }
   };
 
   const bodyTotal = parts.reduce((s, p) => s + (p.estimated_cost || 0), 0);
@@ -97,32 +225,95 @@ export default function PartsPage() {
 
       {activeTab === 'body' && (
         <div className="space-y-2">
-          {parts.map(part => (
-            <Link key={part.id} to={`/design-guide/${part.id}`}
-              className="flex items-center gap-3 p-4 rounded-lg border border-border/20 hover:border-primary/20 transition-all"
-              style={{ background: '#111111' }}>
-              <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border border-border/20" style={{ background: '#0a0a0a' }}>
-                <Box className="w-5 h-5 text-muted-foreground/30" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-medium text-sm">{part.part_name}</h3>
-                  <Badge variant="outline" className={statusColors[part.status] || ''}>
-                    {part.status}
-                  </Badge>
+          {parts.map(part => {
+            const isExpanded = expandedPartId === part.id;
+            const isLoading = !!stlLoading[part.id];
+            const hasStl = !!part.stl_base64;
+            const url = stlUrls[part.id];
+            return (
+              <div key={part.id} className="rounded-lg border border-border/20 overflow-hidden" style={{ background: '#111111' }}>
+                <Link to={`/design-guide/${part.id}`}
+                  className="flex items-center gap-3 p-4 hover:border-primary/20 transition-all">
+                  <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border border-border/20" style={{ background: '#0a0a0a' }}>
+                    <Box className="w-5 h-5 text-muted-foreground/30" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="font-medium text-sm">{part.part_name}</h3>
+                      <Badge variant="outline" className={statusColors[part.status] || ''}>
+                        {part.status}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>{part.material}</span>
+                      <span>{part.manufacturing_method}</span>
+                      <span className="text-primary">${part.estimated_cost}</span>
+                      <ArrowRight className="w-3 h-3 ml-auto text-primary" />
+                    </div>
+                    {part.dimensions && (
+                      <p className="text-xs text-muted-foreground/70 mt-1">📐 {part.dimensions}</p>
+                    )}
+                  </div>
+                </Link>
+
+                <div className="flex items-center gap-2 px-4 pb-3">
+                  <Button
+                    size="sm"
+                    variant={hasStl ? 'outline' : 'default'}
+                    className="text-xs h-8"
+                    disabled={isLoading}
+                    onClick={(e) => handleGenerateStl(part, e)}
+                  >
+                    {isLoading ? (
+                      <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Generating...</>
+                    ) : (
+                      <><Boxes className="w-3.5 h-3.5 mr-1.5" />{hasStl ? 'Regenerate STL' : 'Generate STL'}</>
+                    )}
+                  </Button>
+                  {hasStl && !isLoading && (
+                    <Button size="sm" variant="ghost" className="text-xs h-8" onClick={(e) => toggleExpand(part, e)}>
+                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5 mr-1" /> : <ChevronDown className="w-3.5 h-3.5 mr-1" />}
+                      {isExpanded ? 'Hide preview' : 'Show preview'}
+                    </Button>
+                  )}
+                  {hasStl && (
+                    <Badge variant="outline" className={part.stl_quality_passed ? 'border-green-500/30 text-green-400 ml-auto' : 'border-amber-500/30 text-amber-400 ml-auto'}>
+                      {part.stl_quality_passed ? 'Quality gate passed' : 'Flagged for review'}
+                    </Badge>
+                  )}
                 </div>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span>{part.material}</span>
-                  <span>{part.manufacturing_method}</span>
-                  <span className="text-primary">${part.estimated_cost}</span>
-                  <ArrowRight className="w-3 h-3 ml-auto text-primary" />
-                </div>
-                {part.dimensions && (
-                  <p className="text-xs text-muted-foreground/70 mt-1">📐 {part.dimensions}</p>
+
+                {isLoading && (
+                  <p className="px-4 pb-3 text-xs text-muted-foreground">
+                    Running self-correction loops (AI + FEA). This can take a few minutes.
+                  </p>
+                )}
+
+                {isExpanded && url && !isLoading && (
+                  <div className="border-t border-border/30">
+                    <div className="px-4 py-2 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{part.stl_iterations_used != null ? `${part.stl_iterations_used} refinement iteration(s) used` : ''}</span>
+                      <a href={url} download={`${part.part_name.replace(/\s+/g, '-').toLowerCase()}.stl`} className="text-primary hover:underline flex items-center gap-1">
+                        <Download className="w-3.5 h-3.5" /> Download STL
+                      </a>
+                    </div>
+                    <div className="h-[320px]">
+                      <Canvas camera={{ position: [80, 60, 80], fov: 45 }}>
+                        <ambientLight intensity={0.6} />
+                        <directionalLight position={[50, 80, 50]} intensity={1.1} />
+                        <directionalLight position={[-50, -30, -50]} intensity={0.4} />
+                        <Suspense fallback={null}>
+                          <STLMesh url={url} />
+                        </Suspense>
+                        <Grid infiniteGrid cellSize={10} sectionSize={50} fadeDistance={400} sectionColor="#333" cellColor="#222" />
+                        <OrbitControls makeDefault enableDamping />
+                      </Canvas>
+                    </div>
+                  </div>
                 )}
               </div>
-            </Link>
-          ))}
+            );
+          })}
           {parts.length === 0 && (
             <p className="text-center text-muted-foreground py-12">No body parts generated yet.</p>
           )}
