@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789720102178,
+      "tag": "0000_add_part_dimensions_and_stl",
+      "breakpoints": true
+    }
+  ]
+}

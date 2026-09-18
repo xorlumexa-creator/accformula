@@ -122,6 +122,7 @@ export type Database = {
         Row: {
           component_name: string
           created_at: string
+          dimensions: string | null
           id: string
           model_recommendation: string | null
           price: number | null
@@ -137,6 +138,7 @@ export type Database = {
         Insert: {
           component_name?: string
           created_at?: string
+          dimensions?: string | null
           id?: string
           model_recommendation?: string | null
           price?: number | null
@@ -152,6 +154,7 @@ export type Database = {
         Update: {
           component_name?: string
           created_at?: string
+          dimensions?: string | null
           id?: string
           model_recommendation?: string | null
           price?: number | null
@@ -179,6 +182,7 @@ export type Database = {
           complexity: string | null
           created_at: string
           design_guide: string | null
+          dimensions: string | null
           estimated_cost: number | null
           fix_guide: string | null
           id: string
@@ -189,6 +193,9 @@ export type Database = {
           project_id: string
           sort_order: number | null
           status: string | null
+          stl_base64: string | null
+          stl_iterations_used: number | null
+          stl_quality_passed: boolean | null
           updated_at: string
           user_id: string
         }
@@ -196,6 +203,7 @@ export type Database = {
           complexity?: string | null
           created_at?: string
           design_guide?: string | null
+          dimensions?: string | null
           estimated_cost?: number | null
           fix_guide?: string | null
           id?: string
@@ -206,6 +214,9 @@ export type Database = {
           project_id: string
           sort_order?: number | null
           status?: string | null
+          stl_base64?: string | null
+          stl_iterations_used?: number | null
+          stl_quality_passed?: boolean | null
           updated_at?: string
           user_id: string
         }
@@ -213,6 +224,7 @@ export type Database = {
           complexity?: string | null
           created_at?: string
           design_guide?: string | null
+          dimensions?: string | null
           estimated_cost?: number | null
           fix_guide?: string | null
           id?: string
@@ -223,6 +235,9 @@ export type Database = {
           project_id?: string
           sort_order?: number | null
           status?: string | null
+          stl_base64?: string | null
+          stl_iterations_used?: number | null
+          stl_quality_passed?: boolean | null
           updated_at?: string
           user_id?: string
         }
