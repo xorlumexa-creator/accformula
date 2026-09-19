@@ -19,6 +19,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined;
 interface Part {
   id: string; part_name: string; material: string; manufacturing_method: string;
   estimated_cost: number; complexity: string; dimensions: string; status: string; sort_order: number;
+  purpose?: string; subsystem?: string;
   stl_base64?: string | null; stl_quality_passed?: boolean | null; stl_iterations_used?: number | null;
 }
 
@@ -50,11 +51,22 @@ function normalizeMaterial(raw: string): string {
 }
 
 function buildStlPrompt(part: Part, project: any): string {
-  return `${part.part_name} \u2014 one individual mechanical part for a ${project?.project_name || 'hardware'} project (${project?.description || project?.purpose || 'no further project description'}).
-Dimensions: ${part.dimensions || 'infer reasonable dimensions for a part of this type and function'}.
-Manufacturing method: ${part.manufacturing_method || 'CNC machining or 3D printing, whichever suits this part'}.
-Design complexity level: ${part.complexity || 'Beginner'}.
-Generate a precise, manufacturable CAD model for this exact single part only \u2014 not an assembly, not other parts.`;
+  return `Design a single mechanical CAD part: "${part.part_name}"
+
+PROJECT CONTEXT: This part belongs to "${project?.project_name || 'a hardware project'}" \u2014 ${project?.description || project?.purpose || 'no further project description available'}.
+SUBSYSTEM: ${part.subsystem || 'general structure'}
+FUNCTION / PURPOSE: ${part.purpose || 'structural component of the assembly \u2014 infer a sensible function from its name and subsystem'}
+DIMENSIONS (overall bounding envelope): ${part.dimensions || 'infer reasonable dimensions for a part of this type and function within the stated project'}
+MATERIAL: ${part.material || 'infer an appropriate material for this part\u2019s function'}
+MANUFACTURING METHOD: ${part.manufacturing_method || 'CNC machining or 3D printing, whichever suits this part'}
+COMPLEXITY LEVEL: ${part.complexity || 'Beginner'}
+
+DESIGN REQUIREMENTS \u2014 this is what makes the geometry actually correct, not just the right size:
+- Generate ONLY this single part \u2014 not an assembly, not other parts, not a scene.
+- The geometry must genuinely reflect its stated FUNCTION and SUBSYSTEM role. A "motor mount bracket" must actually look and function like a motor mount \u2014 a real bolt-pattern hole layout, correct standoff height, adequate wall thickness for the load it carries \u2014 not a generic block with the right outer dimensions. A bracket, panel, standoff, or enclosure piece should have the features an equivalent real part would have: mounting holes or slots where it attaches to neighboring parts, fillets or chamfers where mechanically sensible, ribbing if it needs stiffness without excess material.
+- Respect the given dimensions as the part's overall bounding envelope unless they are clearly incompatible with its stated function, in which case adjust minimally.
+- Wall thickness and feature sizing must suit the manufacturing method (e.g. roughly 2-3mm minimum walls for 3D-printed plastic; thinner sections are fine for CNC-machined metal).
+- The part must be immediately manufacturable by the stated method: no floating disconnected geometry, no non-manifold edges, sensible build/machining orientation.`;
 }
 
 function base64ToObjectUrl(b64: string) {
@@ -252,6 +264,9 @@ export default function PartsPage() {
                     </div>
                     {part.dimensions && (
                       <p className="text-xs text-muted-foreground/70 mt-1">📐 {part.dimensions}</p>
+                    )}
+                    {part.purpose && (
+                      <p className="text-xs text-muted-foreground/60 mt-0.5">{part.purpose}</p>
                     )}
                   </div>
                 </Link>

@@ -259,6 +259,8 @@ export default function ProjectPlanPage() {
           estimated_cost: p.estimatedCostUSD || p.estimatedCost || 0,
           complexity: p.complexity || 'Beginner',
           dimensions: p.dimensions || '',
+          purpose: p.purpose || '',
+          subsystem: p.subsystem || '',
           sort_order: i,
         }));
         await supabase.from('project_parts').insert(partsToInsert);
