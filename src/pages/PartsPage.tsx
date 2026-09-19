@@ -69,6 +69,39 @@ DESIGN REQUIREMENTS \u2014 this is what makes the geometry actually correct, not
 - The part must be immediately manufacturable by the stated method: no floating disconnected geometry, no non-manifold edges, sensible build/machining orientation.`;
 }
 
+// Asks the stl-prompt-generator edge function (runs on a separate Groq key from the
+// main planning call, GROQ_API_KEY_2) to further sharpen this part's prompt \u2014 catching
+// cases where its function/subsystem/dimensions are still thin even after the template
+// above fills in the gaps. Falls back to buildStlPrompt's output if that call fails for
+// any reason, so STL generation never hard-blocks on this enrichment step.
+async function buildEnrichedStlPrompt(part: Part, project: any): Promise<string> {
+  const fallback = buildStlPrompt(part, project);
+  try {
+    const { data, error } = await supabase.functions.invoke('stl-prompt-generator', {
+      body: {
+        part: {
+          partName: part.part_name,
+          purpose: part.purpose,
+          subsystem: part.subsystem,
+          dimensions: part.dimensions,
+          material: part.material,
+          manufacturingMethod: part.manufacturing_method,
+          complexity: part.complexity,
+        },
+        project: {
+          projectName: project?.project_name,
+          projectDescription: project?.description || project?.purpose,
+        },
+        fallbackPrompt: fallback,
+      },
+    });
+    if (error || !data?.prompt) return fallback;
+    return data.prompt as string;
+  } catch {
+    return fallback;
+  }
+}
+
 function base64ToObjectUrl(b64: string) {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
@@ -164,8 +197,10 @@ export default function PartsPage() {
     setExpandedPartId(part.id);
 
     try {
+      const enrichedPrompt = await buildEnrichedStlPrompt(part, project);
+
       const form = new FormData();
-      form.append('prompt', buildStlPrompt(part, project));
+      form.append('prompt', enrichedPrompt);
       form.append('material', normalizeMaterial(part.material));
       form.append('max_iterations', '3');
 
