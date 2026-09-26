@@ -177,6 +177,56 @@ export type Database = {
           },
         ]
       }
+      project_macro_parts: {
+        Row: {
+          created_at: string
+          id: string
+          micro_parts_error: string | null
+          name: string
+          project_id: string
+          purpose: string | null
+          sort_order: number | null
+          status: string
+          subsystem: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          micro_parts_error?: string | null
+          name?: string
+          project_id: string
+          purpose?: string | null
+          sort_order?: number | null
+          status?: string
+          subsystem?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          micro_parts_error?: string | null
+          name?: string
+          project_id?: string
+          purpose?: string | null
+          sort_order?: number | null
+          status?: string
+          subsystem?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_macro_parts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_parts: {
         Row: {
           complexity: string | null
@@ -186,16 +236,19 @@ export type Database = {
           estimated_cost: number | null
           fix_guide: string | null
           id: string
-          image_url: string | null
+          macro_part_id: string | null
           manufacturing_method: string | null
           material: string | null
           part_name: string
           project_id: string
+          purpose: string | null
           sort_order: number | null
           status: string | null
           stl_base64: string | null
           stl_iterations_used: number | null
           stl_quality_passed: boolean | null
+          stl_storage_path: string | null
+          subsystem: string | null
           updated_at: string
           user_id: string
         }
@@ -207,16 +260,19 @@ export type Database = {
           estimated_cost?: number | null
           fix_guide?: string | null
           id?: string
-          image_url?: string | null
+          macro_part_id?: string | null
           manufacturing_method?: string | null
           material?: string | null
           part_name?: string
           project_id: string
+          purpose?: string | null
           sort_order?: number | null
           status?: string | null
           stl_base64?: string | null
           stl_iterations_used?: number | null
           stl_quality_passed?: boolean | null
+          stl_storage_path?: string | null
+          subsystem?: string | null
           updated_at?: string
           user_id: string
         }
@@ -228,16 +284,19 @@ export type Database = {
           estimated_cost?: number | null
           fix_guide?: string | null
           id?: string
-          image_url?: string | null
+          macro_part_id?: string | null
           manufacturing_method?: string | null
           material?: string | null
           part_name?: string
           project_id?: string
+          purpose?: string | null
           sort_order?: number | null
           status?: string | null
           stl_base64?: string | null
           stl_iterations_used?: number | null
           stl_quality_passed?: boolean | null
+          stl_storage_path?: string | null
+          subsystem?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -247,6 +306,13 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_parts_macro_part_id_fkey"
+            columns: ["macro_part_id"]
+            isOneToOne: false
+            referencedRelation: "project_macro_parts"
             referencedColumns: ["id"]
           },
         ]
@@ -303,6 +369,7 @@ export type Database = {
       }
       projects: {
         Row: {
+          brief_json: Json | null
           budget_currency: string | null
           budget_range: string | null
           category: string | null
@@ -313,7 +380,6 @@ export type Database = {
           description: string | null
           environment: string | null
           has_3d_printer: boolean | null
-          hero_image_url: string | null
           id: string
           microcontroller: string | null
           power_source: string | null
@@ -326,6 +392,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          brief_json?: Json | null
           budget_currency?: string | null
           budget_range?: string | null
           category?: string | null
@@ -336,7 +403,6 @@ export type Database = {
           description?: string | null
           environment?: string | null
           has_3d_printer?: boolean | null
-          hero_image_url?: string | null
           id?: string
           microcontroller?: string | null
           power_source?: string | null
@@ -349,6 +415,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          brief_json?: Json | null
           budget_currency?: string | null
           budget_range?: string | null
           category?: string | null
@@ -359,7 +426,6 @@ export type Database = {
           description?: string | null
           environment?: string | null
           has_3d_printer?: boolean | null
-          hero_image_url?: string | null
           id?: string
           microcontroller?: string | null
           power_source?: string | null
