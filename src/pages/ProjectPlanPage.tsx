@@ -7,9 +7,9 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Rocket, Bot, User, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { callDesignGenerator } from '@/lib/designGenerator';
 
 const DESIGN_GENERATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-generator`;
-const ENRICH_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enrich-electronics`;
 const AUTH_HEADER = `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
 
 interface ChatMsg {
@@ -53,18 +53,6 @@ async function streamInterview(chatMessages: { role: string; content: string }[]
     }
   }
   return full;
-}
-
-// Calls design-generator in a non-streaming JSON mode (generate_parts / refine_parts).
-async function callDesignGenerator(mode: string, body: Record<string, any>): Promise<any> {
-  const resp = await fetch(DESIGN_GENERATOR_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: AUTH_HEADER },
-    body: JSON.stringify({ mode, ...body }),
-  });
-  const data = await resp.json();
-  if (!resp.ok || data.error) throw new Error(data.error || 'Request failed');
-  return data;
 }
 
 export default function ProjectPlanPage() {
@@ -178,7 +166,7 @@ export default function ProjectPlanPage() {
     // Show generating message
     setMessages(prev => [...prev, {
       role: 'assistant',
-      content: '🚀 **Generating your complete build plan...** This includes parts, electronics, assembly sequence, and testing checklist. Hold tight!'
+      content: '🚀 **Generating your build plan...** This includes your major assemblies, electronics, assembly sequence, and testing checklist. Individual part breakdowns are generated on the Parts page, one assembly at a time. Hold tight!'
     }]);
 
     try {
@@ -189,46 +177,22 @@ export default function ProjectPlanPage() {
         country: profile.country,
       };
 
-      const result = await callDesignGenerator('generate_parts', {
+      // Stage 1 of 2: only the MACRO assemblies (e.g. "Frame", "Arms") plus the full
+      // electronics list get generated now — individual manufacturable parts are generated
+      // later, one macro assembly at a time, only once the user opens it on the Parts page
+      // (see PartsPage.tsx's handleExpandMacro). This is what keeps every single LLM call
+      // small and focused instead of asking for an entire 25-40 part project in one shot.
+      // Electronics pricing/sourcing/dimensions enrichment (real datasheet lookups via Groq's
+      // web-search-enabled compound model) already happens server-side inside this call.
+      const result = await callDesignGenerator('generate_macro_parts', {
         briefData: enrichedBrief,
-        messages: [{ role: 'user', content: 'Generate the complete build plan now.' }],
+        messages: [{ role: 'user', content: 'Generate the project plan now.' }],
       });
 
-      // Electronics pricing/dimensions enrichment needs the Groq secret, so that
-      // one step still runs server-side — everything else already happened client-side.
-      if (result.electronics?.length) {
-        try {
-          const enrichResp = await fetch(ENRICH_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: AUTH_HEADER },
-            body: JSON.stringify({ electronics: result.electronics, country: profile.country }),
-          });
-          if (enrichResp.ok) {
-            const enrichData = await enrichResp.json();
-            if (enrichData.electronics?.length) result.electronics = enrichData.electronics;
-          }
-        } catch (e) {
-          console.error('Electronics enrichment failed, using original estimates:', e);
-        }
-      }
-
-      // Fuse the now-real, verified component dimensions/specs back into the mechanical
-      // parts — enclosures, brackets, standoffs and wire runs get corrected to actually
-      // fit and support what will really be used, instead of the first-pass guesses.
-      if (result.parts?.length && result.electronics?.length) {
-        try {
-          const refined = await callDesignGenerator('refine_parts', {
-            parts: result.parts,
-            electronics: result.electronics,
-            briefData: enrichedBrief,
-          });
-          if (Array.isArray(refined) && refined.length) result.parts = refined;
-        } catch (e) {
-          console.error('Part-fit refinement failed, keeping original part dimensions:', e);
-        }
-      }
-
-      // Create project
+      // Create project — brief_json keeps the FULL original brief (including fields with no
+      // dedicated column, e.g. connectivity/specialRequirements/assumptions) so a micro-parts
+      // generation call, potentially much later in a different session, has the complete
+      // original context to reason with, not just the subset stored in dedicated columns below.
       const { data: projectData, error: projError } = await supabase.from('projects').insert({
         user_id: user.id,
         project_name: briefData.projectName || 'My Project',
@@ -244,26 +208,23 @@ export default function ProjectPlanPage() {
         target_weight: briefData.targetWeight || '',
         target_size: briefData.targetSize || '',
         budget_currency: briefData.budgetCurrency || 'USD',
+        brief_json: enrichedBrief,
       }).select('id').single();
 
       if (projError) throw projError;
 
-      // Save parts
-      if (result.parts?.length) {
-        const partsToInsert = result.parts.map((p: any, i: number) => ({
+      // Save macro parts (status 'pending' — micro parts get generated on demand per assembly)
+      if (result.macroParts?.length) {
+        const macroToInsert = result.macroParts.map((m: any, i: number) => ({
           project_id: projectData.id,
           user_id: user.id,
-          part_name: p.partName || p.part_name || `Part ${i + 1}`,
-          material: p.material || '',
-          manufacturing_method: p.manufacturingMethod || '',
-          estimated_cost: p.estimatedCostUSD || p.estimatedCost || 0,
-          complexity: p.complexity || 'Beginner',
-          dimensions: p.dimensions || '',
-          purpose: p.purpose || '',
-          subsystem: p.subsystem || '',
+          name: m.name || `Assembly ${i + 1}`,
+          purpose: m.purpose || '',
+          subsystem: m.subsystem || '',
+          status: 'pending',
           sort_order: i,
         }));
-        await supabase.from('project_parts').insert(partsToInsert);
+        await supabase.from('project_macro_parts').insert(macroToInsert);
       }
 
       // Save electronics
@@ -283,12 +244,13 @@ export default function ProjectPlanPage() {
         await supabase.from('project_electronics').insert(elecToInsert);
       }
 
-      // Generate tasks
-      const allParts = result.parts || [];
+      // Generate tasks — scoped to macro assemblies, since individual parts don't exist yet
+      // (they're generated later, per assembly, on the Parts page).
+      const allMacroParts = result.macroParts || [];
       const taskInserts: any[] = [];
       let taskNum = 1;
-      for (const part of allParts) {
-        const name = part.partName || part.part_name || 'Part';
+      for (const macro of allMacroParts) {
+        const name = macro.name || 'Assembly';
         taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: `Design ${name}`, estimated_hours: 2, phase: 2, sort_order: taskNum });
         taskInserts.push({ project_id: projectData.id, user_id: user.id, task_number: taskNum++, title: `Analyse ${name}`, estimated_hours: 1, phase: 3, sort_order: taskNum });
       }
