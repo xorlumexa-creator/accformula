@@ -6,6 +6,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
+import ExportMenu from '@/components/ExportMenu';
+import { requiredCavityText, HousedComponent } from '@/lib/internalSpace';
 import { Canvas, useLoader } from '@react-three/fiber';
 import { OrbitControls, Center, Grid } from '@react-three/drei';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
@@ -36,7 +38,8 @@ interface Part {
   purpose?: string; subsystem?: string; macro_part_id?: string | null;
   // stl_base64 is legacy (read-only fallback for parts saved before Storage was used, see
   // partStlStorage.ts); every new generation writes stl_storage_path instead.
-  stl_base64?: string | null; stl_storage_path?: string | null;
+  stl_base64?: string | null; stl_storage_path?: string | null; cad_script?: string | null;
+  housed_components?: HousedComponent[] | null; mounting?: { method?: string; fastener?: string | null; connects_to?: string[] } | null;
   stl_quality_passed?: boolean | null; stl_iterations_used?: number | null;
 }
 
@@ -172,6 +175,8 @@ export default function PartsPage() {
   const [stlLoading, setStlLoading] = useState<Record<string, boolean>>({});
   const [stlElapsed, setStlElapsed] = useState<Record<string, number>>({});
   const [stlUrls, setStlUrls] = useState<Record<string, string>>({});
+  // STEP + script from this session's generations (not persisted - enables STEP/GLB/OBJ/BREP downloads)
+  const [cadExports, setCadExports] = useState<Record<string, { script?: string; step?: string }>>({});
   const [previewLoading, setPreviewLoading] = useState<Record<string, boolean>>({});
   const [expandedPartId, setExpandedPartId] = useState<string | null>(null);
 
@@ -266,6 +271,8 @@ export default function PartsPage() {
         dimensions: p.dimensions || '',
         purpose: p.purpose || '',
         subsystem: macro.subsystem || '',
+        housed_components: Array.isArray(p.houses) ? p.houses.map((h: any) => ({ component: String(h.component || h.name || ''), quantity: Number(h.quantity) || 1 })).filter((h: HousedComponent) => h.component) : [],
+        mounting: p.mounting && typeof p.mounting === 'object' ? p.mounting : null,
         sort_order: i,
       }));
       const { data: inserted, error } = await supabase.from('project_parts').insert(toInsert).select('*');
@@ -348,7 +355,7 @@ export default function PartsPage() {
     setExpandedPartId(part.id);
 
     try {
-      const enrichedPrompt = await buildEnrichedStlPrompt(part, project);
+      const enrichedPrompt = (await buildEnrichedStlPrompt(part, project)) + (await requiredCavityText(project.id, part.housed_components));
 
       const form = new FormData();
       form.append('prompt', enrichedPrompt);
@@ -373,14 +380,16 @@ export default function PartsPage() {
 
       await supabase.from('project_parts').update({
         stl_storage_path: storagePath,
+        cad_script: (data.generated_script as string | undefined) ?? null,
         stl_quality_passed: passed,
         stl_iterations_used: iterations,
       }).eq('id', part.id);
 
-      patchPart(part.id, part.macro_part_id, { stl_storage_path: storagePath, stl_quality_passed: passed, stl_iterations_used: iterations });
+      patchPart(part.id, part.macro_part_id, { stl_storage_path: storagePath, cad_script: (data.generated_script as string | undefined) ?? null, stl_quality_passed: passed, stl_iterations_used: iterations });
 
       // We already have the bytes in memory from this generation — preview them directly
       // rather than immediately re-fetching the file we just uploaded via a signed URL.
+      setCadExports(prev => ({ ...prev, [part.id]: { script: data.generated_script as string | undefined, step: data.generated_step_base64 as string | undefined } }));
       showStlFromBase64(part, stlBase64);
       toast.success(passed ? 'STL generated — passed quality checks.' : 'STL generated, but flagged in review — check the preview.');
     } catch (err) {
@@ -468,9 +477,8 @@ export default function PartsPage() {
           <div className="border-t border-border/30">
             <div className="px-4 py-2 flex items-center justify-between text-xs text-muted-foreground">
               <span>{part.stl_iterations_used != null ? `${part.stl_iterations_used} refinement iteration(s) used` : ''}</span>
-              <a href={url} download={`${part.part_name.replace(/\s+/g, '-').toLowerCase()}.stl`} className="text-primary hover:underline flex items-center gap-1">
-                <Download className="w-3.5 h-3.5" /> Download STL
-              </a>
+              <ExportMenu baseName={part.part_name.replace(/\s+/g, '-').toLowerCase()} stlUrl={url}
+                stepBase64={cadExports[part.id]?.step} script={cadExports[part.id]?.script ?? part.cad_script} />
             </div>
             <div className="h-[320px]">
               <Canvas camera={{ position: [80, 60, 80], fov: 45 }}>
