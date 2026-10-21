@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Rocket, Box, Code2, Cpu, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Upload, FileInput, Search, Microscope, MessageSquare, Timer, LogOut, Menu, X, Rocket, Box, Code2, Cpu, CreditCard, Layers } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import lumexaLogo from '@/assets/lumexa-logo.webp';
 
@@ -9,6 +9,7 @@ const navItems = [
   { to: '/project-plan', icon: Rocket, label: 'Project Plan' },
   { to: '/parts', icon: Box, label: 'Parts & Materials' },
   { to: '/import-design', icon: FileInput, label: 'CAD Analysis' },
+  { to: '/assembly-studio', icon: Layers, label: 'Assembly' },
   { to: '/assembly', icon: Search, label: 'Inspector' },
   { to: '/fea', icon: Microscope, label: 'FEA' },
   { to: '/code-section', icon: Code2, label: 'Code Section' },
