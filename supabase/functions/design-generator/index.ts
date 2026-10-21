@@ -157,11 +157,19 @@ DIMENSIONING — reason like a mechanical engineer, not a guesser:
 - Consider the LOAD this part actually carries (a motor's thrust and vibration, a battery's real weight, a structural member's span, expected drop/impact for a handheld device) and size wall thickness / cross-section accordingly — don't just guess a generic wall thickness.
 - Give your best real-world-grounded initial estimate; it will be cross-checked against real comparable products in a separate web-search pass next, so reasoning quality here matters more than perfect precision.
 
+INTERNAL SPACE AND ASSEMBLY — you describe WHAT goes where, never how big the cavity is:
+- For every part that encloses, holds or routes electronics, list them in "houses": the EXACT componentName from the electronics list above and a quantity. Never invent a component and never invent a size. A part with nothing inside uses an empty list.
+- Do NOT state internal cavity dimensions or internal volumes. The system computes the space those components need from their datasheet sizes, hands that number to the CAD generator, and then MEASURES the real cavity of the finished part and rejects it if it is too small. Just make the part's outside "dimensions" large enough for the housed components plus wall thickness.
+- For every part give "mounting": how it attaches to the rest of THIS assembly. method is one of bolted | snap_fit | press_fit | slide_in | adhesive | none. fastener is a metric size such as "M3" when bolted (otherwise null). connects_to lists the exact partName of the other parts in this assembly it touches. Every part must connect to at least one other part, and the connections must form one connected assembly.
+- Bolted joints need matching holes on both parts: say so in "purpose" (for example "4 x M3 clearance holes on a 50 x 30 mm pattern in its base flange").
+
 Return ONLY valid JSON:
 {
   "parts": [
     {
       "partName":"...","purpose":"...","material":"...","dimensions":"...","estimatedCostUSD":0,"manufacturingMethod":"...","complexity":"Beginner|Intermediate|Advanced",
+      "houses":[{"component":"<exact componentName from the electronics list>","quantity":1}],
+      "mounting":{"method":"bolted|snap_fit|press_fit|slide_in|adhesive|none","fastener":"M3","connects_to":["<partName of another part in this assembly>"]},
       "image_prompt": "Photorealistic 3D CAD render of [PART] — part of [PROJECT]: [dimensions], [material], isometric 3/4 zoomed, Background: #E8E8E8, top-left lighting, 4-6 leader line annotations",
       "design_guide_context": "Key engineering context for generating step-by-step guide"
     }
@@ -359,6 +367,8 @@ function mergeRefinedParts(original: any[], refined: any[]): any[] {
     const r = refined[i] || {};
     const merged: any = { ...orig };
     for (const key of Object.keys(orig)) {
+      // what a part houses and how it mounts come from the designer step only; a web-search pass must never rewrite them
+      if (key === "houses" || key === "mounting") continue;
       const v = r[key];
       if (v !== undefined && v !== null && v !== "") merged[key] = v;
     }
