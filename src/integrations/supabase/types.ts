@@ -248,6 +248,9 @@ export type Database = {
           stl_iterations_used: number | null
           stl_quality_passed: boolean | null
           stl_storage_path: string | null
+          cad_script: string | null
+          housed_components: Json
+          mounting: Json | null
           subsystem: string | null
           updated_at: string
           user_id: string
@@ -272,6 +275,9 @@ export type Database = {
           stl_iterations_used?: number | null
           stl_quality_passed?: boolean | null
           stl_storage_path?: string | null
+          cad_script?: string | null
+          housed_components?: Json
+          mounting?: Json | null
           subsystem?: string | null
           updated_at?: string
           user_id: string
@@ -296,6 +302,9 @@ export type Database = {
           stl_iterations_used?: number | null
           stl_quality_passed?: boolean | null
           stl_storage_path?: string | null
+          cad_script?: string | null
+          housed_components?: Json
+          mounting?: Json | null
           subsystem?: string | null
           updated_at?: string
           user_id?: string
