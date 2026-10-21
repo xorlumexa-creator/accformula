@@ -13,6 +13,7 @@ import ChatPage from "./pages/ChatPage";
 import LapCalculatorPage from "./pages/LapCalculatorPage";
 import FEAAnalysisPage from "./pages/FEAAnalysisPage";
 import AssemblyBuilderPage from "./pages/AssemblyBuilderPage";
+import AssemblyStudioPage from "./pages/AssemblyStudioPage";
 import AuthPage from "./pages/AuthPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import ProjectPlanPage from "./pages/ProjectPlanPage";
@@ -58,6 +59,7 @@ const App = () => (
                 <Route path="/lap-calculator" element={<LapCalculatorPage />} />
                 <Route path="/fea" element={<FEAAnalysisPage />} />
                 <Route path="/assembly" element={<AssemblyBuilderPage />} />
+                <Route path="/assembly-studio" element={<AssemblyStudioPage />} />
                 <Route path="/project-plan" element={<ProjectPlanPage />} />
                 <Route path="/parts" element={<PartsPage />} />
                 <Route path="/design-guide/:partId" element={<DesignGuidePage />} />
