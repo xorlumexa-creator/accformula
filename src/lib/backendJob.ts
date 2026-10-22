@@ -30,6 +30,10 @@ export interface PollJobOptions {
    *  the tab forever. The job may still finish server-side after this — this only stops the
    *  browser from waiting on it. */
   timeoutMs?: number;
+  /** Backend path to POST the form to. Default '/generate-validate-refine-async' (the AI loop);
+   *  pass '/generate-from-script-async' to run a user-supplied build123d file instead. Both are polled
+   *  via GET /job/{id} and resolve to the same result shape. */
+  endpoint?: string;
 }
 
 /** Extracts the most useful message out of a FastAPI-style JSON or plain-text error body. */
@@ -55,9 +59,9 @@ export async function submitAndPollJob(
   form: FormData,
   opts: PollJobOptions = {}
 ): Promise<any> {
-  const { onTick, intervalMs = 5000, timeoutMs = 25 * 60 * 1000 } = opts;
+  const { onTick, intervalMs = 5000, timeoutMs = 25 * 60 * 1000, endpoint = '/generate-validate-refine-async' } = opts;
 
-  const submitRes = await fetch(`${backendUrl}/generate-validate-refine-async`, {
+  const submitRes = await fetch(`${backendUrl}${endpoint}`, {
     method: 'POST',
     body: form,
   });
