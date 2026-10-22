@@ -13,9 +13,11 @@ import { OrbitControls, Center, Grid } from '@react-three/drei';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { toast } from 'sonner';
 import {
-  Box, CheckCircle2, Circle, ArrowRight, DollarSign, Boxes, Loader2, Download, ChevronDown, ChevronUp, AlertTriangle, RefreshCw
+  Box, CheckCircle2, Circle, ArrowRight, DollarSign, Boxes, Loader2, Download, ChevronDown, ChevronUp, AlertTriangle, RefreshCw, FileText
 } from 'lucide-react';
 import { submitAndPollJob } from '@/lib/backendJob';
+import GenerateStlDialog, { type StlGenerateChoice } from '@/components/GenerateStlDialog';
+import { downloadTextFile } from '@/lib/downloadText';
 import { uploadPartStl, getPartStlSignedUrl } from '@/lib/partStlStorage';
 import { callDesignGenerator, briefFromProject } from '@/lib/designGenerator';
 
@@ -61,12 +63,23 @@ const statusColors: Record<string, string> = {
 };
 
 // Maps the free-text material string our AI generates (e.g. "6061 Aluminum",
-// "ABS plastic") onto the fixed enum the STL-generation backend accepts.
+// "ABS plastic") onto the keys of the backend's MATERIALS table. Any other key makes the
+// backend silently fall back to aluminum_6061, so steel/titanium/plastic parts were being
+// analysed as aluminum. (ABS has no entry of its own: generic plastics map to PETG, the
+// closest strength class there.)
 function normalizeMaterial(raw: string): string {
   const s = (raw || '').toLowerCase();
-  if (s.includes('titanium')) return 'titanium_grade5';
-  if (s.includes('steel')) return 'steel_1045';
-  if (s.includes('abs') || s.includes('plastic') || s.includes('pla') || s.includes('nylon') || s.includes('petg') || s.includes('polymer')) return 'abs_plastic';
+  if (s.includes('inconel')) return 'inconel_718';
+  if (s.includes('titanium') || s.includes('ti-6al') || s.includes('grade 5')) return 'titanium_6al4v';
+  if (s.includes('stainless') || s.includes('316')) return 'stainless_316l';
+  if (s.includes('steel') || s.includes('4340') || s.includes('1045')) return 'steel_4340';
+  if (s.includes('magnesium')) return 'magnesium_az31';
+  if (s.includes('carbon')) return 'carbon_fiber_ud';
+  if (s.includes('alsi10mg') || s.includes('slm')) return 'alsi10mg_slm';
+  if (s.includes('7075')) return 'aluminum_7075';
+  if (s.includes('petg')) return 'petg_plastic';
+  if (/\bpla\b/.test(s)) return 'pla_plastic';
+  if (s.includes('abs') || s.includes('plastic') || s.includes('nylon') || s.includes('polymer')) return 'petg_plastic';
   return 'aluminum_6061';
 }
 
@@ -176,9 +189,11 @@ export default function PartsPage() {
   const [stlElapsed, setStlElapsed] = useState<Record<string, number>>({});
   const [stlUrls, setStlUrls] = useState<Record<string, string>>({});
   // STEP + script from this session's generations (not persisted - enables STEP/GLB/OBJ/BREP downloads)
-  const [cadExports, setCadExports] = useState<Record<string, { script?: string; step?: string }>>({});
+  const [cadExports, setCadExports] = useState<Record<string, { script?: string; step?: string; report?: string; reportPassed?: boolean }>>({});
   const [previewLoading, setPreviewLoading] = useState<Record<string, boolean>>({});
   const [expandedPartId, setExpandedPartId] = useState<string | null>(null);
+  // The part whose "Generate STL" chooser (Lumexa AI vs. my own build123d file) is open.
+  const [stlDialogPart, setStlDialogPart] = useState<Part | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -343,11 +358,19 @@ export default function PartsPage() {
     setExpandedPartId(part.id);
   };
 
-  const handleGenerateStl = async (part: Part, e: React.MouseEvent) => {
+  // Tapping "Generate STL" opens a chooser: let Lumexa's AI write the build123d code, or run a
+  // build123d file the person supplies. runGenerate does the work once they've picked.
+  const openGenerateDialog = (part: Part, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!BACKEND_URL) { toast.error('STL backend is not configured (VITE_BACKEND_URL missing).'); return; }
     if (!user) return;
+    if (stlLoading[part.id]) return;
+    setStlDialogPart(part);
+  };
+
+  const runGenerate = async (part: Part, choice: StlGenerateChoice) => {
+    if (!BACKEND_URL || !user) return;
     if (stlLoading[part.id]) return;
 
     setStlLoading(prev => ({ ...prev, [part.id]: true }));
@@ -355,24 +378,50 @@ export default function PartsPage() {
     setExpandedPartId(part.id);
 
     try {
-      const enrichedPrompt = (await buildEnrichedStlPrompt(part, project)) + (await requiredCavityText(project.id, part.housed_components));
-
       const form = new FormData();
-      form.append('prompt', enrichedPrompt);
-      form.append('material', normalizeMaterial(part.material));
-      form.append('max_iterations', '3');
+      let endpoint: string | undefined;
+      if (choice.mode === 'script') {
+        // No LLM: the backend runs this exact script through sandbox -> geometry checks -> FEA once.
+        endpoint = '/generate-from-script-async';
+        form.append('script', choice.script);
+        form.append('prompt', buildStlPrompt(part, project));
+        form.append('part_name', part.part_name);
+        form.append('material', normalizeMaterial(part.material));
+        form.append('force_n', String(choice.forceN));
+        form.append('force_dir', choice.forceDir);
+        if (choice.testPlanJson) form.append('test_plan_json', choice.testPlanJson);
+      } else {
+        const enrichedPrompt = (await buildEnrichedStlPrompt(part, project)) + (await requiredCavityText(project.id, part.housed_components));
+        form.append('prompt', enrichedPrompt);
+        form.append('material', normalizeMaterial(part.material));
+        form.append('max_iterations', '3');
+      }
 
       // Submit-and-poll instead of one long fetch: each refinement iteration can run a
       // multi-minute SimScale FEA solve, and the backend's single worker needs to stay free
       // to answer these polls while that runs in the background. See lib/backendJob.ts.
       const data = await submitAndPollJob(BACKEND_URL, form, {
+        endpoint,
         onTick: ({ elapsedSeconds }) => setStlElapsed(prev => ({ ...prev, [part.id]: elapsedSeconds })),
       });
 
       const passed = !!data.refinement?.passed_quality_gate;
       const iterations = data.refinement?.iterations_used ?? null;
+      const report = data.analysis_report_md as string | undefined;
+
+      // Keep the downloadable analysis report whatever happened: passed, failed the safety
+      // checks, or the script never ran. (Session-only, like the STEP export below.)
+      if (report) {
+        setCadExports(prev => ({ ...prev, [part.id]: { ...prev[part.id], report, reportPassed: passed } }));
+      }
+
+      if (data.execution_error) {
+        toast.error(`Your script did not run: ${String(data.execution_error).slice(0, 220)} Download the report and send it to Claude.`);
+        return;
+      }
+
       const stlBase64 = data.generated_stl_base64 as string;
-      if (!stlBase64) throw new Error('Backend did not return an STL.');
+      if (!stlBase64) throw new Error(data.analysis_error ? `Analysis failed: ${data.analysis_error}` : 'Backend did not return an STL.');
 
       // Store the file in Supabase Storage rather than the stl_base64 column — see
       // lib/partStlStorage.ts for why. New rows never write stl_base64 at all.
@@ -389,9 +438,11 @@ export default function PartsPage() {
 
       // We already have the bytes in memory from this generation — preview them directly
       // rather than immediately re-fetching the file we just uploaded via a signed URL.
-      setCadExports(prev => ({ ...prev, [part.id]: { script: data.generated_script as string | undefined, step: data.generated_step_base64 as string | undefined } }));
+      setCadExports(prev => ({ ...prev, [part.id]: { ...prev[part.id], script: data.generated_script as string | undefined, step: data.generated_step_base64 as string | undefined } }));
       showStlFromBase64(part, stlBase64);
-      toast.success(passed ? 'STL generated — passed quality checks.' : 'STL generated, but flagged in review — check the preview.');
+      if (passed) toast.success('STL generated — passed quality checks.');
+      else if (report) toast.warning('STL generated, but it did not pass the safety checks — download the analysis report.');
+      else toast.success('STL generated, but flagged in review — check the preview.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -437,13 +488,13 @@ export default function PartsPage() {
           </div>
         </Link>
 
-        <div className="flex items-center gap-2 px-4 pb-3">
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
           <Button
             size="sm"
             variant={hasStl ? 'outline' : 'default'}
             className="text-xs h-8"
             disabled={isLoading}
-            onClick={(e) => handleGenerateStl(part, e)}
+            onClick={(e) => openGenerateDialog(part, e)}
           >
             {isLoading ? (
               <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Generating...</>
@@ -457,6 +508,18 @@ export default function PartsPage() {
               {isPreviewLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
                 : isExpanded ? <ChevronUp className="w-3.5 h-3.5 mr-1" /> : <ChevronDown className="w-3.5 h-3.5 mr-1" />}
               {isPreviewLoading ? 'Loading...' : isExpanded ? 'Hide preview' : 'Show preview'}
+            </Button>
+          )}
+          {cadExports[part.id]?.report && !isLoading && (
+            <Button size="sm" variant="outline"
+              className={`text-xs h-8 ${cadExports[part.id]?.reportPassed ? '' : 'border-amber-500/40 text-amber-400'}`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                downloadTextFile(`${part.part_name.replace(/\s+/g, '-').toLowerCase()}-analysis-report.md`, cadExports[part.id]!.report!);
+              }}>
+              <FileText className="w-3.5 h-3.5 mr-1.5" />
+              {cadExports[part.id]?.reportPassed ? 'Analysis report' : 'Download failure report'}
             </Button>
           )}
           {hasStl && (
@@ -664,6 +727,17 @@ export default function PartsPage() {
         )}
       </div>
       <AdSenseBanner />
+
+      <GenerateStlDialog
+        open={!!stlDialogPart}
+        partName={stlDialogPart?.part_name ?? ''}
+        onClose={() => setStlDialogPart(null)}
+        onChoose={(choice) => {
+          const p = stlDialogPart;
+          setStlDialogPart(null);
+          if (p) void runGenerate(p, choice);
+        }}
+      />
     </div>
   );
 }
