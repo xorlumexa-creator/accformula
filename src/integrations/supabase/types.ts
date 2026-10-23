@@ -250,6 +250,7 @@ export type Database = {
           stl_storage_path: string | null
           cad_script: string | null
           housed_components: Json
+          required_tests: Json
           mounting: Json | null
           subsystem: string | null
           updated_at: string
@@ -277,6 +278,7 @@ export type Database = {
           stl_storage_path?: string | null
           cad_script?: string | null
           housed_components?: Json
+          required_tests?: Json
           mounting?: Json | null
           subsystem?: string | null
           updated_at?: string
@@ -304,6 +306,7 @@ export type Database = {
           stl_storage_path?: string | null
           cad_script?: string | null
           housed_components?: Json
+          required_tests?: Json
           mounting?: Json | null
           subsystem?: string | null
           updated_at?: string
