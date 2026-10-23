@@ -25,11 +25,13 @@ const MAX_FILE_BYTES = 200_000; // matches the backend's 200 KB cap
 interface Props {
   open: boolean;
   partName: string;
+  /** Display names of the tests this part must pass (from its Supabase record). */
+  requiredTests?: string[];
   onClose: () => void;
   onChoose: (choice: StlGenerateChoice) => void;
 }
 
-export default function GenerateStlDialog({ open, partName, onClose, onChoose }: Props) {
+export default function GenerateStlDialog({ open, partName, requiredTests = [], onClose, onChoose }: Props) {
   const [view, setView] = useState<'choose' | 'script'>('choose');
   const [script, setScript] = useState('');
   const [scriptName, setScriptName] = useState('');
@@ -148,6 +150,13 @@ export default function GenerateStlDialog({ open, partName, onClose, onChoose }:
             </DialogHeader>
 
             <div className="space-y-4 pt-1">
+              {requiredTests.length > 0 && (
+                <div className="rounded-md border border-border/30 p-3 text-[11px] text-muted-foreground" style={{ background: '#0a0a0a' }}>
+                  This part must pass: <span className="text-foreground">{requiredTests.join(', ')}</span>. Put a{' '}
+                  <code className="text-foreground">TEST_PLAN = {'{...}'}</code> block in the script (or attach a test plan file) that
+                  covers each one. The backend runs exactly these tests and won&apos;t pass the part unless each one ran.
+                </div>
+              )}
               <div className="space-y-2">
                 <Label className="text-xs">build123d script (.py)</Label>
                 <input
@@ -208,8 +217,8 @@ export default function GenerateStlDialog({ open, partName, onClose, onChoose }:
                   {planName ? planName : 'Choose test plan'}
                 </Button>
                 <p className="text-[11px] text-muted-foreground/70">
-                  Without a plan, one simple load case is used. With a plan, static, buckling and thermal tests run as
-                  real FEM on the faces it selects.
+                  Not needed if your script already has a TEST_PLAN block. With a plan, the required static, buckling and
+                  thermal tests run as real FEM on the faces it selects; without one, only a single generic load case runs.
                 </p>
               </div>
 
