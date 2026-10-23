@@ -34,6 +34,14 @@ interface MacroPart {
   micro_parts_error?: string | null; sort_order: number;
 }
 
+const TEST_LABELS: Record<string, string> = { static_stress: 'Static', buckling: 'Buckling', thermal_stress: 'Thermal' };
+
+// The tests a part must pass, from its Supabase record (project_parts.required_tests).
+function requiredTestsOf(part: { required_tests?: unknown }): string[] {
+  const raw = part.required_tests;
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && x in TEST_LABELS) : [];
+}
+
 interface Part {
   id: string; part_name: string; material: string; manufacturing_method: string;
   estimated_cost: number; complexity: string; dimensions: string; status: string; sort_order: number;
@@ -41,6 +49,8 @@ interface Part {
   // stl_base64 is legacy (read-only fallback for parts saved before Storage was used, see
   // partStlStorage.ts); every new generation writes stl_storage_path instead.
   stl_base64?: string | null; stl_storage_path?: string | null; cad_script?: string | null;
+  // Analyses this part must pass (test_plan.py names), e.g. ["static_stress","thermal_stress"]. Empty = not specified.
+  required_tests?: string[] | null;
   housed_components?: HousedComponent[] | null; mounting?: { method?: string; fastener?: string | null; connects_to?: string[] } | null;
   stl_quality_passed?: boolean | null; stl_iterations_used?: number | null;
 }
@@ -397,6 +407,11 @@ export default function PartsPage() {
         form.append('max_iterations', '3');
       }
 
+      // Tell the backend which tests this part must pass; it runs exactly those and won't call the
+      // part "passed" unless each one ran.
+      const required = requiredTestsOf(part);
+      if (required.length) form.append('required_tests', JSON.stringify(required));
+
       // Submit-and-poll instead of one long fetch: each refinement iteration can run a
       // multi-minute SimScale FEA solve, and the backend's single worker needs to stay free
       // to answer these polls while that runs in the background. See lib/backendJob.ts.
@@ -481,6 +496,9 @@ export default function PartsPage() {
             </div>
             {part.dimensions && (
               <p className="text-xs text-muted-foreground/70 mt-1">📐 {part.dimensions}</p>
+            )}
+            {requiredTestsOf(part).length > 0 && (
+              <p className="text-xs text-muted-foreground/70 mt-1">🧪 Tests: {requiredTestsOf(part).map(t => TEST_LABELS[t]).join(' · ')}</p>
             )}
             {part.purpose && (
               <p className="text-xs text-muted-foreground/60 mt-0.5">{part.purpose}</p>
@@ -731,6 +749,7 @@ export default function PartsPage() {
       <GenerateStlDialog
         open={!!stlDialogPart}
         partName={stlDialogPart?.part_name ?? ''}
+        requiredTests={stlDialogPart ? requiredTestsOf(stlDialogPart).map(t => TEST_LABELS[t]) : []}
         onClose={() => setStlDialogPart(null)}
         onChoose={(choice) => {
           const p = stlDialogPart;
