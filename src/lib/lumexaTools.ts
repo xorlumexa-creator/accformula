@@ -1,16 +1,14 @@
 import type { AssemblyResult, BalanceAnalysis } from '@/lib/assemblyApi';
+import { backendFetch } from '@/lib/backendUrl';
 
 // Client for the backend's lighter design endpoints: balance what-ifs, aerodynamics, parametric shapes, crankshaft.
 // None of them needs the CAD kernel except to run the scripts they return, so they answer quickly.
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined;
-
 async function post<T>(path: string, body: unknown, timeoutMs = 60000): Promise<T> {
-  if (!BACKEND_URL) throw new Error('VITE_BACKEND_URL is not configured.');
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${BACKEND_URL}${path}`, {
+    const res = await backendFetch(path, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal,
     });
     const text = await res.text();
@@ -104,8 +102,7 @@ export interface Capacity {
   max_skin_triangles: number; max_upload_mb: number; assembly_busy: boolean;
 }
 export const fetchCapacity = async (): Promise<Capacity> => {
-  if (!BACKEND_URL) throw new Error('VITE_BACKEND_URL is not configured.');
-  const res = await fetch(`${BACKEND_URL}/capacity`);
+  const res = await backendFetch('/capacity');
   if (!res.ok) throw new Error(`capacity failed (${res.status})`);
   return res.json();
 };
@@ -131,7 +128,6 @@ export interface SkinReport {
 }
 /** Multipart upload (read once on the server, no base64 doubling of the file in memory). */
 export async function checkSkin(file: File, interfaces: SkinInterface[], geometryHash: string, params: Record<string, number> = {}): Promise<SkinReport> {
-  if (!BACKEND_URL) throw new Error('VITE_BACKEND_URL is not configured.');
   const fd = new FormData();
   fd.append('file', file);
   fd.append('graph', JSON.stringify({ interfaces }));
@@ -140,7 +136,7 @@ export async function checkSkin(file: File, interfaces: SkinInterface[], geometr
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 240000);
   try {
-    const res = await fetch(`${BACKEND_URL}/skin-check`, { method: 'POST', body: fd, signal: ctl.signal });
+    const res = await backendFetch('/skin-check', { method: 'POST', body: fd, signal: ctl.signal });
     const text = await res.text();
     if (!res.ok) {
       let msg = text;

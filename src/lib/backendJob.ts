@@ -16,6 +16,8 @@
 // Python process, not Deno) — but it turns one long blocking request into a cheap
 // submit-and-poll pattern the backend can actually serve concurrently.
 
+import { backendFetch } from '@/lib/backendUrl';
+
 export interface JobProgress {
   elapsedSeconds: number;
 }
@@ -49,19 +51,19 @@ async function extractErrorMessage(res: Response): Promise<string> {
 }
 
 /**
- * POSTs `form` to `${backendUrl}/generate-validate-refine-async`, then polls
- * `${backendUrl}/job/{job_id}` until it completes, fails, or times out.
+ * POSTs `form` to the backend's `/generate-validate-refine-async` (or `opts.endpoint`), then polls
+ * `/job/{job_id}` until it completes, fails, or times out. The backend's address comes from lib/backendUrl.ts, so a
+ * tunnel that restarts on a new address mid-job is followed instead of killing the poll.
  * Resolves with the final result object (the same shape /generate-validate-refine
  * itself returns: generated_stl_base64, refinement, health_score, ...).
  */
 export async function submitAndPollJob(
-  backendUrl: string,
   form: FormData,
   opts: PollJobOptions = {}
 ): Promise<any> {
   const { onTick, intervalMs = 5000, timeoutMs = 25 * 60 * 1000, endpoint = '/generate-validate-refine-async' } = opts;
 
-  const submitRes = await fetch(`${backendUrl}${endpoint}`, {
+  const submitRes = await backendFetch(endpoint, {
     method: 'POST',
     body: form,
   });
@@ -83,7 +85,13 @@ export async function submitAndPollJob(
 
     await new Promise((r) => setTimeout(r, intervalMs));
 
-    const jobRes = await fetch(`${backendUrl}/job/${jobId}`);
+    let jobRes: Response;
+    try {
+      jobRes = await backendFetch(`/job/${jobId}`);
+    } catch {
+      // Network blip, or the tunnel is restarting: keep polling until the timeout.
+      continue;
+    }
     if (!jobRes.ok) {
       // A transient 5xx while the backend is busy shouldn't kill the whole poll loop —
       // only a real error result (JOB_STORE status "error", handled below) should.

@@ -1,7 +1,7 @@
 // Download helpers for the CAD formats the backend can produce (see backend GET /export-formats).
 // STEP / BREP are exact B-rep (open in FreeCAD, Fusion, SolidWorks...). STL / GLB / OBJ are meshes. All in mm.
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined;
+import { backendFetch } from '@/lib/backendUrl';
 
 export type ExportFormat = 'step' | 'stl' | 'glb' | 'obj' | 'brep';
 
@@ -33,11 +33,10 @@ export function saveBlob(blob: Blob, filename: string) {
 
 /** Asks the backend to build `format` from the design script. Returns the file as a Blob. */
 export async function exportFromScript(script: string, format: ExportFormat): Promise<Blob> {
-  if (!BACKEND_URL) throw new Error('VITE_BACKEND_URL is not configured.');
   const form = new FormData();
   form.append('script', script);
   form.append('format', format);
-  const res = await fetch(`${BACKEND_URL}/export`, { method: 'POST', body: form });
+  const res = await backendFetch('/export', { method: 'POST', body: form });
   const text = await res.text();
   if (!res.ok) {
     let msg = text;

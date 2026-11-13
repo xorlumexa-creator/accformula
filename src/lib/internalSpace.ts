@@ -2,8 +2,7 @@
 // must provide, computed by the backend from the components' datasheet sizes. A language model is never asked to measure or
 // guess the cavity; the assembly page measures the real cavity afterwards and checks it against the same numbers.
 import { supabase } from '@/integrations/supabase/client';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined;
+import { backendFetch } from '@/lib/backendUrl';
 
 export interface HousedComponent { component: string; quantity?: number }
 
@@ -23,11 +22,11 @@ export function matchElectronics(housed: HousedComponent[], electronics: Electro
 
 /** Extra prompt text for a part that houses components, or '' when there is nothing to add (or the backend is unreachable). */
 export async function requiredCavityText(projectId: string, housed?: HousedComponent[] | null): Promise<string> {
-  if (!housed?.length || !BACKEND_URL) return '';
+  if (!housed?.length) return '';
   try {
     const { data } = await supabase.from('project_electronics').select('component_name,dimensions,quantity').eq('project_id', projectId);
     const items = matchElectronics(housed, (data ?? []) as ElectronicRow[]);
-    const res = await fetch(`${BACKEND_URL}/required-cavity`, {
+    const res = await backendFetch('/required-cavity', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ components: items, clearance_mm: 1.5, margin_mm: 1.5, wire_allowance_mm: 6 }),

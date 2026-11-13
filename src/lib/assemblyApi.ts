@@ -1,7 +1,7 @@
 // Client for the backend's assembly endpoints. The backend does all the geometry (placing parts, measuring the internal space
 // of each part, choosing bolts, checking fit); this file only sends scripts and hints and reads the result back.
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined;
+import { backendFetch } from '@/lib/backendUrl';
 
 export interface Cavity {
   id: string;
@@ -170,8 +170,7 @@ export async function buildAssembly(
   onTick?: (info: { seconds: number; stage?: string; memoryMb?: number }) => void,
   timeoutMs = 10 * 60 * 1000,
 ): Promise<AssemblyResult> {
-  if (!BACKEND_URL) throw new Error('VITE_BACKEND_URL is not configured.');
-  const sub = await fetch(`${BACKEND_URL}/assembly-plan-async`, {
+  const sub = await backendFetch('/assembly-plan-async', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -184,7 +183,7 @@ export async function buildAssembly(
     await new Promise((r) => setTimeout(r, 3000));
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/job/${job_id}`);
+      res = await backendFetch(`/job/${job_id}`);
     } catch {
       continue; // network blip: keep polling
     }
