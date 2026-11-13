@@ -618,7 +618,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      lumexa_get_backend: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      lumexa_register_backend: {
+        Args: { p_secret: string; p_url: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
